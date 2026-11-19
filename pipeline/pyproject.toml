@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "playalong"
+version = "0.1.0"
+description = "Play-along: Liedpakete bauen und Aufnahmen mit Noten abgleichen (nur CPU)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "librosa>=0.10",
+  "numba>=0.58",
+  "numpy>=1.24",
+]
+
+[project.scripts]
+playalong = "playalong.cli:main"
+
+[tool.setuptools]
+packages = ["playalong"]
