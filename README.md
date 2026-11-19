@@ -63,10 +63,12 @@ Die App braucht die Noten als **MusicXML** (`.musicxml`, `.xml` oder `.mxl`). PD
 | Auf einen Takt tippen | Setzt die Startposition dorthin |
 | ⟲ Schleife | Taktbereich wiederholen. Bereich eingeben oder „Im Notenbild antippen“ (Start- und Endtakt antippen). Optional **Tempo steigern** pro Durchgang (z. B. +5 % bis 100 %). |
 | ♩ Metronom | Klick dazuschalten, z. B. für Etüden ohne Begleitung |
-| ⚙︎ Einstellungen | Klavierstimme anzeigen, Lautstärken, Klarinettenstimme zum Anhören, Einzähler, Notengröße, Verhalten bei Fermaten |
+| ⚙︎ Einstellungen | Begleitstimmen einblenden oder stummschalten, Lautstärken, Klarinettenstimme zum Anhören, Einzähler, Notengröße, Verhalten bei Fermaten |
 | Fermate / Kadenz | Der Player hält an und wartet. Weiter mit **„Weiter“**, Tippen auf die Noten, Leertaste oder Bluetooth-Pedal. (Abschaltbar: dann wird die Fermate automatisch ausgehalten.) |
 
 Mehrtaktpausen: Die Begleitung spielt weiter, der Cursor wandert durch die Pause, oben steht die aktuelle Taktnummer.
+
+**Orchesterpartituren** (z. B. von musescore.com): Alle Stimmen außer der Klarinette werden als Begleitung mit Klavierklang gespielt, die Lautstärke wird automatisch angepasst. Unter ⚙︎ → **Begleitstimmen** kann man einzelne Stimmen zum Mitlesen einblenden („Noten“) oder stummschalten („hören“), z. B. Pauke oder Chor. Schlagzeug ohne Tonhöhen wird nicht mitgespielt. Anfangs wird nur die eigene Stimme gezeigt – mit allen Stimmen wird das Notenbild sehr lang.
 
 ## 5. Updates
 

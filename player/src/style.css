@@ -145,6 +145,12 @@ fieldset input[type=range] { width: 100%; margin: 0 0 8px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 40px; }
 .row > span:first-child { min-width: 7em; }
 .hint { color: var(--muted); font-size: .85rem; margin: 4px 0; }
+#acc-list { max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.acc-row { display: grid; grid-template-columns: 1fr 3.6em 3.6em; align-items: center; min-height: 40px; border-bottom: 1px solid #eee8dc; }
+.acc-row > :not(:first-child) { justify-self: center; }
+.acc-row input { width: 24px; height: 24px; }
+.acc-head { min-height: 24px; font-size: .8rem; color: var(--muted); border-bottom: 0; }
+.acc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 6px; }
 .mic-meter { flex: 1; min-width: 80px; max-width: 180px; height: 10px; border-radius: 5px; background: #e6e1d6; overflow: hidden; }
 .mic-meter span { display: block; height: 100%; width: 0; background: #27ae60; transition: width .08s linear; }
 

@@ -26,7 +26,10 @@ export class ScoreView {
   private lastSystemTop = -1;
   private userScrolledAt = 0;
   zoom = 1;
-  showAccompaniment = true;
+  /** sichtbare Begleitstimmen (Part-IDs); die eigene Stimme ist immer sichtbar */
+  visibleParts = new Set<string>();
+  /** Part-IDs in Partitur-Reihenfolge (eigene Stimme zuerst) */
+  partIds: string[] = [];
   private soloPartId = '';
 
   constructor(private scroller: HTMLElement, private host: HTMLElement) {
@@ -80,7 +83,8 @@ export class ScoreView {
     if (!sheet) return;
     sheet.Instruments.forEach((ins, i) => {
       // Erste Stimme ist immer die eigene (siehe prepareScore)
-      ins.Visible = i === 0 || this.showAccompaniment;
+      const id = this.partIds[i] ?? ins.IdString;
+      ins.Visible = i === 0 || this.visibleParts.has(id);
     });
     this.osmd.Zoom = this.zoom;
     this.osmd.render();

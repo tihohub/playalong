@@ -157,8 +157,21 @@ export function readTitle(doc: Document): { title: string; composer: string } {
   return { title, composer };
 }
 
+/** Doppelt kodierte Zeichen in Namen reparieren (z. B. „Flute 1 &amp; 2“ aus MuseScore 3) */
+function fixNames(doc: Document): void {
+  const map: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  const sel = 'part-name, part-abbreviation, instrument-name, display-text, work-title, movement-title, creator, credit-words';
+  for (const el of Array.from(doc.querySelectorAll(sel))) {
+    const t = el.textContent ?? '';
+    if (!t.includes('&')) continue;
+    el.textContent = t.replace(/&(amp|lt|gt|quot|apos);/g, (_, k: string) => map[k])
+      .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(parseInt(n, 10)));
+  }
+}
+
 export function prepareScore(xmlText: string, opts: { soloPartId?: string; notation?: Notation } = {}): PreparedScore {
   const doc = parseXml(xmlText);
+  fixNames(doc);
   const parts = readParts(doc);
   if (parts.length === 0) throw new Error('Die Partitur enthält keine Stimmen.');
 

@@ -96,16 +96,25 @@
           <div class="sheet-head"><h2>Einstellungen</h2><button id="opt-close" class="btn">Fertig</button></div>
           <fieldset>
             <legend>Anzeige</legend>
-            <label class="chk"><input type="checkbox" id="opt-show-acc" checked /> Klavierstimme anzeigen</label>
             <div class="row"><span>Notengröße</span>
               <button id="zoom-minus" class="btn small">A−</button>
               <span id="zoom-label">100 %</span>
               <button id="zoom-plus" class="btn small">A＋</button>
             </div>
           </fieldset>
+          <fieldset id="acc-fieldset">
+            <legend>Begleitstimmen</legend>
+            <div class="acc-row acc-head"><span></span><span>Noten</span><span>hören</span></div>
+            <div id="acc-list"></div>
+            <div class="row">
+              <button id="acc-show-all" class="btn small">Alle Noten zeigen</button>
+              <button id="acc-show-none" class="btn small">Keine Noten</button>
+            </div>
+            <p class="hint">„Noten“ blendet die Stimme im Notenbild ein. Viele Stimmen machen das Notenbild lang und das Setzen langsamer. „hören“ schaltet die Stimme in der Begleitung stumm oder an.</p>
+          </fieldset>
           <fieldset>
             <legend>Klang</legend>
-            <label class="chk"><input type="checkbox" id="opt-acc" checked /> Begleitung (Klavier) hören</label>
+            <label class="chk"><input type="checkbox" id="opt-acc" checked /> Begleitung hören</label>
             <input type="range" id="opt-acc-vol" min="0" max="100" value="80" aria-label="Lautstärke Begleitung" />
             <label class="chk"><input type="checkbox" id="opt-solo" /> Klarinettenstimme zum Anhören</label>
             <input type="range" id="opt-solo-vol" min="0" max="100" value="60" aria-label="Lautstärke Klarinette" />

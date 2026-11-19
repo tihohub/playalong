@@ -140,6 +140,11 @@ export class Engine {
     countInBars: 1, holdMode: 'auto', fermataStretch: 2,
   };
 
+  /** stummgeschaltete Begleitstimmen */
+  mutedParts = new Set<string>();
+  /** Lautstärkeausgleich für die Begleitung, abhängig davon, wie viele Töne gleichzeitig klingen */
+  private accNorm = 1;
+
   state: EngineState = 'stopped';
   tempo = 1; // Faktor
   loop: LoopSettings | null = null;
@@ -170,7 +175,14 @@ export class Engine {
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC({ latencyHint: 'interactive' });
     this.master = this.ctx.createGain();
-    this.master.connect(this.ctx.destination);
+    // Begrenzer: verhindert Übersteuern bei vielen gleichzeitigen Stimmen (z. B. Orchesterpartitur)
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    this.master.connect(limiter).connect(this.ctx.destination);
     this.accGain = this.ctx.createGain();
     this.soloGain = this.ctx.createGain();
     this.metGain = this.ctx.createGain();
@@ -213,6 +225,25 @@ export class Engine {
     this.soloPart = soloPart;
     this.stopPos = 0;
     this.rebuildMap();
+    this.updateAccNorm();
+  }
+
+  setMutedParts(ids: Iterable<string>): void {
+    this.mutedParts = new Set(ids);
+    this.updateAccNorm();
+  }
+
+  /** Viele Stimmen (Orchester) -> Begleitung leiser, damit sie so laut wirkt wie ein Klaviersatz */
+  private updateAccNorm(): void {
+    const tl = this.tl;
+    if (!tl || tl.length <= 0) return;
+    let sum = 0;
+    for (const n of tl.notes) {
+      if (n.part !== this.soloPart && !this.mutedParts.has(n.part)) sum += n.dur;
+    }
+    const avg = sum / tl.length; // durchschnittlich gleichzeitig klingende Töne
+    this.accNorm = Math.min(1, Math.sqrt(5 / Math.max(avg, 1e-6)));
+    this.applyVolumes();
   }
 
   private rebuildMap(): void {
@@ -252,7 +283,7 @@ export class Engine {
   private applyVolumes(): void {
     const t = this.ctx.currentTime;
     const o = this.opts;
-    this.accGain.gain.setTargetAtTime(o.accompaniment ? o.accompanimentVolume : 0, t, 0.02);
+    this.accGain.gain.setTargetAtTime(o.accompaniment ? o.accompanimentVolume * this.accNorm : 0, t, 0.02);
     this.soloGain.gain.setTargetAtTime(o.solo ? o.soloVolume : 0, t, 0.02);
     this.metGain.gain.setTargetAtTime(o.metronome ? o.metronomeVolume : 0, t, 0.02);
   }
@@ -670,6 +701,7 @@ export class Engine {
       this.noteIdx++;
       if (n.start < this.scheduledPos - 1e-9) continue;
       const isSolo = n.part === this.soloPart;
+      if (!isSolo && this.mutedParts.has(n.part)) continue;
       const when = this.timeOf(a, n.start);
       const endQ = Math.min(n.start + n.dur, endPos);
       const end = atLimit && includeAtLimit ? null : this.timeOf(a, endQ);

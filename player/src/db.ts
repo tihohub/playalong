@@ -9,6 +9,10 @@ export interface SongSettings {
   loopTo?: string;
   soloPart?: string;
   notation?: 'auto' | 'concert' | 'transposed';
+  /** eingeblendete Begleitstimmen */
+  visibleParts?: string[];
+  /** stummgeschaltete Begleitstimmen */
+  mutedParts?: string[];
 }
 
 export interface Song {

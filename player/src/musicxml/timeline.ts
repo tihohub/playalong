@@ -71,7 +71,8 @@ interface RawMeasure {
   beats: number;
   beatType: number;
   notes: RawNote[];
-  tempos: { rel: number; qpm: number }[];
+  tempos: { rel: number; qpm: number }[]; // aus <sound tempo>
+  metroTempos: { rel: number; qpm: number }[]; // aus Metronomangaben (nur falls kein <sound tempo>)
   fermatas: { rel: number; dur: number }[];
   cadenza: boolean;
   rehearsal: string[];
@@ -109,18 +110,23 @@ function kids(el: Element, name?: string): Element[] {
 
 function emptyMeasure(label: string): RawMeasure {
   return {
-    label, length: 0, beats: 4, beatType: 4, notes: [], tempos: [], fermatas: [], cadenza: false,
+    label, length: 0, beats: 4, beatType: 4, notes: [], tempos: [], metroTempos: [], fermatas: [], cadenza: false,
     rehearsal: [], words: [], repeatForward: false, repeatBackward: false, repeatTimes: 2,
     endingStart: null, endingStop: false, segno: false, coda: false, toCoda: false,
     daCapo: false, dalSegno: false, fine: false,
   };
 }
 
-function readSound(s: Element, m: RawMeasure, rel: number, first: boolean): void {
+/** Tempo nur einmal pro Position übernehmen (steht oft in mehreren Stimmen) */
+function addTempo(list: { rel: number; qpm: number }[], rel: number, qpm: number): void {
+  if (!list.some((x) => Math.abs(x.rel - rel) < 1e-6)) list.push({ rel, qpm });
+}
+
+function readSound(s: Element, m: RawMeasure, rel: number): void {
   const tempo = s.getAttribute('tempo');
-  if (tempo && first) {
+  if (tempo) {
     const q = parseFloat(tempo);
-    if (q > 0) m.tempos.push({ rel, qpm: q });
+    if (q > 0) addTempo(m.tempos, rel, q);
   }
   if (s.hasAttribute('segno')) m.segno = true;
   if (s.hasAttribute('coda')) m.coda = true;
@@ -137,7 +143,7 @@ function readMeasures(doc: Document): RawMeasure[] {
 
   parts.forEach((part, partIndex) => {
     const pid = part.getAttribute('id') ?? `P${partIndex}`;
-    const first = partIndex === 0;
+    const first = partIndex === 0; // Taktart aus der ersten Stimme
     let divisions = 1;
     let transpose = 0;
     let beats = 4;
@@ -150,8 +156,6 @@ function readMeasures(doc: Document): RawMeasure[] {
       let pos = 0; // in divisions
       let maxPos = 0;
       let lastOnset = 0;
-      const metronomes: { rel: number; qpm: number }[] = [];
-      let hasSoundTempo = false;
 
       for (const el of Array.from(mEl.children)) {
         switch (el.nodeName) {
@@ -212,10 +216,10 @@ function readMeasures(doc: Document): RawMeasure[] {
             const rel = (pos + offset) / divisions;
             for (const dt of kids(el, 'direction-type')) {
               for (const c of Array.from(dt.children)) {
-                if (c.nodeName === 'rehearsal' && first && t(c)) m.rehearsal.push(t(c));
+                if (c.nodeName === 'rehearsal' && t(c) && !m.rehearsal.includes(t(c))) m.rehearsal.push(t(c));
                 if (c.nodeName === 'words' && t(c)) {
                   const w = t(c);
-                  if (first) m.words.push(w);
+                  if (!m.words.includes(w)) m.words.push(w);
                   if (CADENZA_RE.test(w)) m.cadenza = true;
                   if (/^\s*(to\s+coda|zur\s+coda)/i.test(w)) m.toCoda = true;
                   if (/^\s*d\.\s*c\./i.test(w) || /^\s*da\s+capo/i.test(w)) m.daCapo = true;
@@ -228,26 +232,24 @@ function readMeasures(doc: Document): RawMeasure[] {
                   const d = c.firstElementChild?.nodeName;
                   if (d && DYN[d] !== undefined) vel = DYN[d];
                 }
-                if (c.nodeName === 'metronome' && first) {
+                if (c.nodeName === 'metronome') {
                   const unit = BEAT_UNIT[t(c.querySelector('beat-unit'))] ?? 1;
                   const dots = c.querySelectorAll('beat-unit-dot').length;
                   const pm = num(c.querySelector('per-minute'));
-                  if (pm > 0) metronomes.push({ rel, qpm: pm * unit * (dots ? 1.5 : 1) });
+                  if (pm > 0) addTempo(m.metroTempos, rel, pm * unit * (dots ? 1.5 : 1));
                 }
               }
             }
             const snd = el.querySelector(':scope > sound');
             if (snd) {
-              if (snd.hasAttribute('tempo')) hasSoundTempo = true;
-              readSound(snd, m, rel, first);
+              readSound(snd, m, rel);
               const dyn = snd.getAttribute('dynamics');
               if (dyn) vel = Math.min(1, parseFloat(dyn) / 100) || vel;
             }
             break;
           }
           case 'sound':
-            if (el.hasAttribute('tempo')) hasSoundTempo = true;
-            readSound(el, m, pos / divisions, first);
+            readSound(el, m, pos / divisions);
             break;
           case 'barline': {
             const rep = el.querySelector('repeat');
@@ -269,14 +271,13 @@ function readMeasures(doc: Document): RawMeasure[] {
             if (el.querySelector('segno')) m.segno = true;
             if (el.querySelector('coda')) m.coda = true;
             const snd = el.querySelector('sound');
-            if (snd) readSound(snd, m, pos / divisions, first);
+            if (snd) readSound(snd, m, pos / divisions);
             break;
           }
         }
         if (pos > maxPos) maxPos = pos;
       }
 
-      if (first && !hasSoundTempo) m.tempos.push(...metronomes);
       if (first) {
         m.beats = beats;
         m.beatType = beatType;
@@ -288,7 +289,11 @@ function readMeasures(doc: Document): RawMeasure[] {
 
   // Takte ohne Inhalt: Länge aus der Taktart
   for (const m of result) {
-    if (m.length <= 0) m.length = (m.beats * 4) / m.beatType;
+    const expected = (m.beats * 4) / m.beatType;
+    if (m.length <= 0) m.length = expected;
+    // Rundungsfehler aus der Datei ausgleichen
+    else if (Math.abs(m.length - expected) < 0.02) m.length = expected;
+    if (m.tempos.length === 0) m.tempos = m.metroTempos;
   }
   return result;
 }
@@ -381,6 +386,7 @@ export function buildTimeline(doc: Document): Timeline {
   const seenMarks = new Set<number>();
   const open = new Map<string, NoteEvent>(); // gebundene Noten
   let pos = 0;
+  let lastMarkQpm = -1;
 
   for (const si of order) {
     const m = raw[si];
@@ -412,9 +418,18 @@ export function buildTimeline(doc: Document): Timeline {
     if (!seenMarks.has(si)) {
       seenMarks.add(si);
       for (const r of m.rehearsal) marks.push({ label: r, kind: 'rehearsal', src: si, pos });
-      const w = m.words;
-      if (w.length && (m.tempos.length || m.cadenza)) marks.push({ label: w.join(' '), kind: 'tempo', src: si, pos });
+      // Tempowechsel (auch ohne Text) und Kadenzen als Sprungziele
+      const firstTempo = [...m.tempos].sort((a, b) => a.rel - b.rel)[0];
+      const changed = firstTempo && Math.abs(firstTempo.qpm - lastMarkQpm) >= 1;
+      const words = m.words.filter((x) => !/^\s*(to|zu[mr]?|muta in|change to)\s/i.test(x)).join(' ');
+      if (m.cadenza) {
+        marks.push({ label: words || 'Kadenz', kind: 'tempo', src: si, pos });
+      } else if (changed) {
+        const q = `♩=${Math.round(firstTempo.qpm)}`;
+        marks.push({ label: words ? `${words} (${q})` : q, kind: 'tempo', src: si, pos });
+      }
     }
+    for (const tp of m.tempos) lastMarkQpm = tp.qpm;
 
     // Metronomschläge: zusammengesetzte Taktarten (6/8, 9/8, 12/8) in punktierten Vierteln
     const compound = m.beatType === 8 && m.beats % 3 === 0 && m.beats > 3;
