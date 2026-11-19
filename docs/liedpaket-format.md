@@ -35,17 +35,27 @@ mein-lied.playalong
 | `soloPart` | (optional) `id` der eigenen Stimme in der MusicXML (`<score-part id="…">`). Ohne Angabe wird die Klarinette automatisch erkannt. |
 | `notation` | (optional) `auto` (Standard), `transposed` (Stimme ist in B notiert) oder `concert` (Stimme ist klingend notiert und wird nach B transponiert) |
 
-## sync.json (Version 2, Entwurf)
+## sync.json
+
+Wird von `playalong build` bzw. `playalong sync` erzeugt (siehe `pipeline/README.md`).
 
 ```json
 {
   "version": 1,
   "audio": "original.mp3",
+  "duration": 274.364,
+  "end": 273.282,
   "measures": [
-    { "index": 0, "time": 0.42 },
-    { "index": 1, "time": 2.71 }
+    { "index": 0, "label": "1", "time": 0.07 },
+    { "index": 1, "label": "2", "time": 3.07 }
   ]
 }
 ```
 
-`index` ist der Index des **gespielten** Takts (nach Auflösen der Wiederholungen, beginnend bei 0), `time` der Startzeitpunkt in Sekunden in der Aufnahme. Das Format wird mit Version 2 festgelegt.
+| Feld | Bedeutung |
+|---|---|
+| `measures[].index` | Index des **gespielten** Takts, beginnend bei 0, nach Auflösen der Wiederholungen, Volten und D.C./D.S. genau wie im Player (`player/src/musicxml/timeline.ts`) |
+| `measures[].label` | Taktnummer laut Partitur (nur zur Lesbarkeit) |
+| `measures[].time` | Startzeit des Takts in der Aufnahme, in Sekunden |
+| `end` | Zeitpunkt, an dem der letzte Takt endet |
+| `duration` | Gesamtlänge der Aufnahme in Sekunden |

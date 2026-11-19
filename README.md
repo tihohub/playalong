@@ -7,7 +7,7 @@
 | Ordner | Inhalt |
 |---|---|
 | `player/` | Die Web-App für das iPad (Version 1) |
-| `pipeline/` | Werkzeuge für den Server (Version 2, folgt), dort liegt schon das Skript für die Demo-Stücke |
+| `pipeline/` | Programm für den Server: Liedpakete bauen, Aufnahme (MP3) mit den Noten abgleichen, siehe [`pipeline/README.md`](pipeline/README.md) |
 | `docs/` | Format der Liedpakete, Lizenzen |
 
 ---

@@ -1,4 +1,6 @@
 // Aus der MusicXML eine abspielbare Zeitleiste erzeugen.
+// WICHTIG: pipeline/playalong/score.py setzt dieselben Regeln in Python um (Taktindizes in sync.json).
+// Änderungen an Wiederholungen, Volten, D.C./D.S. oder Tempi immer in beiden Dateien nachziehen.
 // Alle Positionen sind in Viertelnoten ab Stückbeginn (nach Auflösen der Wiederholungen).
 
 export interface NoteEvent {
