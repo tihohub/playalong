@@ -60,3 +60,7 @@ Ein Übungs-Player ähnlich Tomplay für meinen Sohn Noel (B-Klarinette). Er spi
 4. Danach Version 2 (Pipeline + Original-Audio-Modus).
 
 Nach jedem Schritt kurz zusammenfassen, was ich auf dem iPad testen soll.
+
+## Zusammenarbeit
+- **Erst vorschlagen, dann auf meine Bestätigung warten.** Bei Rückmeldungen, Änderungswünschen oder neuen Ideen zuerst kurz den Lösungsvorschlag beschreiben (ggf. mit Alternativen) und **nicht mit der Umsetzung beginnen**, bevor ich ausdrücklich zugestimmt habe (z. B. „ja“, „go“, „mach“).
+- Eine Zustimmung gilt nur für den besprochenen Vorschlag, nicht für weitere Änderungen.
