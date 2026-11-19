@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Play-along</title>
+    <meta name="description" content="Übungs-Player für Klarinette mit Begleitung" />
+    <meta name="theme-color" content="#1d2b3a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Play-along" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  </head>
+  <body>
+    <!-- Bibliothek -->
+    <section id="library" class="view">
+      <header class="lib-head">
+        <h1><img src="icons/icon-192.png" alt="" class="logo" /> Play-along</h1>
+        <div class="lib-actions">
+          <label class="btn primary" for="file-input">＋ Lied importieren</label>
+          <input id="file-input" type="file" multiple hidden />
+        </div>
+      </header>
+      <main class="lib-main">
+        <ul id="song-list" class="song-list"></ul>
+        <div id="empty-hint" class="empty" hidden>
+          <p>Noch keine Lieder in der Bibliothek.</p>
+          <p>Tippe auf <b>„Lied importieren“</b> und wähle ein Liedpaket (<code>.playalong</code>) oder eine MusicXML-Datei (<code>.musicxml</code>, <code>.mxl</code>) aus der Dateien-App.</p>
+        </div>
+        <div class="demo-box">
+          <button id="add-demos" class="btn">Demo-Stücke hinzufügen</button>
+        </div>
+        <p class="footer-note" id="app-info"></p>
+      </main>
+    </section>
+
+    <!-- Player -->
+    <section id="player" class="view" hidden>
+      <header class="toolbar">
+        <div class="tb-row">
+          <button id="btn-back" class="btn icon" title="Zur Bibliothek" aria-label="Zur Bibliothek">‹</button>
+          <div class="song-title" id="song-title"></div>
+          <div class="pos-display" id="pos-display">Takt –</div>
+          <button id="btn-options" class="btn icon" title="Einstellungen" aria-label="Einstellungen">⚙︎</button>
+        </div>
+        <div class="tb-row controls">
+          <button id="btn-rewind" class="btn icon" title="Zum Anfang" aria-label="Zum Anfang">⏮</button>
+          <button id="btn-play" class="btn play" aria-label="Abspielen">▶</button>
+          <div class="tempo">
+            <button id="tempo-minus" class="btn icon small" aria-label="Langsamer">−</button>
+            <input id="tempo" type="range" min="25" max="150" step="1" value="100" aria-label="Tempo" />
+            <button id="tempo-plus" class="btn icon small" aria-label="Schneller">＋</button>
+            <span id="tempo-label" class="tempo-label">100 %</span>
+          </div>
+          <select id="jump" class="select" aria-label="Springen zu"></select>
+          <button id="btn-loop" class="btn toggle" aria-pressed="false">⟲ Schleife</button>
+          <button id="btn-metronome" class="btn toggle" aria-pressed="false" title="Metronom">♩ Metronom</button>
+        </div>
+        <div class="tb-row loop-row" id="loop-row" hidden>
+          <span>Takt</span>
+          <input id="loop-from" class="num" inputmode="numeric" aria-label="Schleife von Takt" />
+          <span>bis</span>
+          <input id="loop-to" class="num" inputmode="numeric" aria-label="Schleife bis Takt" />
+          <button id="loop-pick" class="btn small">Im Notenbild antippen</button>
+          <label class="chk"><input type="checkbox" id="loop-inc-on" /> Tempo steigern</label>
+          <select id="loop-inc" class="select small" aria-label="Steigerung pro Durchgang">
+            <option value="2">+2 %</option><option value="5" selected>+5 %</option><option value="10">+10 %</option>
+          </select>
+          <span>bis</span>
+          <select id="loop-target" class="select small" aria-label="Ziel-Tempo">
+            <option>80</option><option>90</option><option selected>100</option><option>110</option><option>120</option>
+          </select><span>%</span>
+          <span class="loop-info" id="loop-info"></span>
+        </div>
+      </header>
+
+      <div id="score-scroller" class="score-scroller">
+        <div class="score-wrap">
+          <div id="score"></div>
+        </div>
+      </div>
+
+      <div id="hold-overlay" class="hold-overlay" hidden>
+        <button id="btn-continue" class="btn continue">Weiter ▶<small id="hold-kind"></small></button>
+      </div>
+      <div id="countin" class="countin" hidden></div>
+      <div id="toast" class="toast" hidden></div>
+      <div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Lädt …</span></div>
+
+      <!-- Einstellungen -->
+      <div id="options" class="sheet" hidden>
+        <div class="sheet-inner">
+          <div class="sheet-head"><h2>Einstellungen</h2><button id="opt-close" class="btn">Fertig</button></div>
+          <fieldset>
+            <legend>Anzeige</legend>
+            <label class="chk"><input type="checkbox" id="opt-show-acc" checked /> Klavierstimme anzeigen</label>
+            <div class="row"><span>Notengröße</span>
+              <button id="zoom-minus" class="btn small">A−</button>
+              <span id="zoom-label">100 %</span>
+              <button id="zoom-plus" class="btn small">A＋</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Klang</legend>
+            <label class="chk"><input type="checkbox" id="opt-acc" checked /> Begleitung (Klavier) hören</label>
+            <input type="range" id="opt-acc-vol" min="0" max="100" value="80" aria-label="Lautstärke Begleitung" />
+            <label class="chk"><input type="checkbox" id="opt-solo" /> Klarinettenstimme zum Anhören</label>
+            <input type="range" id="opt-solo-vol" min="0" max="100" value="60" aria-label="Lautstärke Klarinette" />
+            <label class="chk"><input type="checkbox" id="opt-met" /> Metronom</label>
+            <input type="range" id="opt-met-vol" min="0" max="100" value="60" aria-label="Lautstärke Metronom" />
+          </fieldset>
+          <fieldset>
+            <legend>Ablauf</legend>
+            <div class="row"><span>Einzähler</span>
+              <select id="opt-countin" class="select small">
+                <option value="0">aus</option><option value="1" selected>1 Takt</option><option value="2">2 Takte</option>
+              </select>
+            </div>
+            <label class="chk"><input type="checkbox" id="opt-wait" checked /> Bei Fermaten und Kadenzen warten, bis ich tippe</label>
+            <p class="hint">Weiter geht es mit Tippen auf „Weiter“, auf die Noten, mit der Leertaste oder einem Bluetooth-Pedal.</p>
+          </fieldset>
+          <fieldset id="part-fieldset">
+            <legend>Stimmen</legend>
+            <div class="row"><span>Meine Stimme</span><select id="opt-solo-part" class="select"></select></div>
+            <div class="row"><span>Notiert</span>
+              <select id="opt-notation" class="select">
+                <option value="auto">automatisch erkennen</option>
+                <option value="transposed">in B (wie gedruckt)</option>
+                <option value="concert">klingend → nach B transponieren</option>
+              </select>
+            </div>
+            <p class="hint" id="transpose-hint"></p>
+          </fieldset>
+        </div>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
