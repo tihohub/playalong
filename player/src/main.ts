@@ -186,18 +186,22 @@ async function loadScore(): Promise<void> {
   tl = buildTimeline(prepared.doc);
   if (!view) view = new ScoreView($('score-scroller'), $('score'));
   view.zoom = st.zoom ?? defaultZoom();
-  view.showAccompaniment = st.showPiano ?? true;
+  // Eingeblendete Begleitstimmen: gespeichert, sonst Klavierstimmen (Orchester: nur eigene Stimme)
+  const acc = prepared.parts.filter((p) => p.id !== prepared!.soloPartId);
+  const visible = st.visibleParts ?? (st.showPiano === false ? [] : acc.filter((p) => p.isPiano).map((p) => p.id));
+  view.partIds = prepared.parts.map((p) => p.id);
+  view.visibleParts = new Set(visible);
   await view.load(prepared.xml, prepared.soloPartId);
   view.render();
   engine.setTimeline(tl, prepared.soloPartId);
+  engine.setMutedParts(st.mutedParts ?? []);
   engine.loop = null;
   loopOn = false;
   setTempoUi(st.tempo ?? 100);
   engine.setTempo((st.tempo ?? 100) / 100);
   fillJumpList();
   fillPartOptions();
-  $<HTMLInputElement>('opt-show-acc').checked = view.showAccompaniment;
-  $<HTMLInputElement>('opt-show-acc').disabled = prepared.parts.length < 2;
+  fillAccompanimentList();
   $('zoom-label').textContent = `${Math.round(view.zoom * 100)} %`;
   $<HTMLInputElement>('loop-from').value = st.loopFrom ?? tl.sourceMeasures[0]?.label ?? '1';
   $<HTMLInputElement>('loop-to').value = st.loopTo ?? tl.sourceMeasures[Math.min(3, tl.sourceMeasures.length - 1)]?.label ?? '1';
@@ -673,12 +677,71 @@ function rerender(): void {
   view.render();
   applyLoop();
 }
-$('opt-show-acc').addEventListener('change', (e) => {
+// ---------------------------------------------------------------- Begleitstimmen
+function fillAccompanimentList(): void {
+  const list = $('acc-list');
+  list.replaceChildren();
+  const acc = prepared!.parts.filter((p) => p.id !== prepared!.soloPartId);
+  $('acc-fieldset').hidden = acc.length === 0;
+  const audible = new Set(tl!.notes.map((n) => n.part));
+  for (const p of acc) {
+    const row = document.createElement('div');
+    row.className = 'acc-row';
+    const name = document.createElement('span');
+    name.className = 'acc-name';
+    name.textContent = p.name;
+    const show = document.createElement('input');
+    show.type = 'checkbox';
+    show.checked = view!.visibleParts.has(p.id);
+    show.setAttribute('aria-label', `${p.name}: Noten anzeigen`);
+    show.addEventListener('change', () => {
+      if (show.checked) view!.visibleParts.add(p.id);
+      else view!.visibleParts.delete(p.id);
+      visibleChanged();
+    });
+    const hear = document.createElement('input');
+    hear.type = 'checkbox';
+    hear.checked = !engine.mutedParts.has(p.id);
+    // Schlagzeug ohne Tonhöhen klingt nicht mit
+    if (!audible.has(p.id)) {
+      hear.checked = false;
+      hear.disabled = true;
+      hear.title = 'Schlagzeug wird nicht mitgespielt';
+    }
+    hear.setAttribute('aria-label', `${p.name}: hören`);
+    hear.addEventListener('change', () => {
+      const muted = new Set(engine.mutedParts);
+      if (hear.checked) muted.delete(p.id);
+      else muted.add(p.id);
+      engine.setMutedParts(muted);
+      saveSettings({ mutedParts: [...muted] });
+    });
+    row.append(name, show, hear);
+    list.appendChild(row);
+  }
+}
+// Neu setzen erst kurz nach der letzten Änderung (mehrere Häkchen hintereinander)
+let visibleTimer = 0;
+function visibleChanged(): void {
   if (!view) return;
-  view.showAccompaniment = (e.target as HTMLInputElement).checked;
-  saveSettings({ showPiano: view.showAccompaniment });
-  rerender();
-});
+  saveSettings({ visibleParts: [...view.visibleParts] });
+  clearTimeout(visibleTimer);
+  visibleTimer = window.setTimeout(() => {
+    loading(true, 'Noten werden neu gesetzt …');
+    setTimeout(() => {
+      rerender();
+      loading(false);
+    }, 30);
+  }, 700);
+}
+function setAllVisible(on: boolean): void {
+  if (!view || !prepared) return;
+  view.visibleParts = new Set(on ? prepared.parts.filter((p) => p.id !== prepared!.soloPartId).map((p) => p.id) : []);
+  fillAccompanimentList();
+  visibleChanged();
+}
+$('acc-show-all').addEventListener('click', () => setAllVisible(true));
+$('acc-show-none').addEventListener('click', () => setAllVisible(false));
 function setZoom(z: number): void {
   if (!view) return;
   view.zoom = Math.max(0.5, Math.min(2, Math.round(z * 10) / 10));
