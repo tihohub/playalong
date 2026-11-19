@@ -613,8 +613,8 @@ bindVol('opt-solo-vol', 'soloVolume');
 bindVol('opt-met-vol', 'metronomeVolume');
 // Fermaten & Kadenzen
 const HOLD_HINTS: Record<HoldMode, string> = {
-  auto: 'Fermaten und Kadenzen werden automatisch ausgehalten, danach spielt die Begleitung weiter.',
-  mic: 'Der Player hört über das Mikrofon zu und spielt weiter, sobald du den Fermatenton absetzt. Bei Kadenzen wartet er auf etwa 1 Sekunde Pause. Der Ton wird nur auf dem iPad ausgewertet, nichts wird aufgenommen. Tippen oder Pedal geht zusätzlich immer.',
+  auto: 'Fermaten werden automatisch ausgehalten. Kadenzen laufen in den notierten Notenwerten im eingestellten Tempo – für freie Kadenzen besser „Mikrofon“ oder „Tippen / Pedal“ wählen.',
+  mic: 'Der Player hört über das Mikrofon zu: Er wartet auf den Fermatenton bzw. den Schlusston der Kadenz und spielt sofort weiter, wenn du ihn absetzt. Wird der Ton nicht erkannt, geht es nach einer kurzen Pause weiter (bei Kadenzen nach ca. 1 Sekunde). Ausgewertet wird nur auf dem iPad, nichts wird aufgenommen. Tippen oder Pedal geht zusätzlich immer.',
   tap: 'Weiter geht es mit Tippen auf „Weiter“ oder die Noten, mit der Leertaste oder einem Bluetooth-Pedal.',
 };
 function updateHoldUi(): void {
