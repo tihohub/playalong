@@ -1,5 +1,5 @@
 import './style.css';
-import { Engine, EngineState } from './audio/engine';
+import { Engine, EngineState, HoldMode } from './audio/engine';
 import { ScoreView } from './score/view';
 import { prepareScore, PreparedScore } from './musicxml/prepare';
 import { buildTimeline, measureAt, Timeline } from './musicxml/timeline';
@@ -25,7 +25,7 @@ interface GlobalPrefs {
   accompaniment: boolean; accompanimentVolume: number;
   solo: boolean; soloVolume: number;
   metronome: boolean; metronomeVolume: number;
-  countInBars: number; waitAtHolds: boolean;
+  countInBars: number; holdMode: HoldMode; fermataStretch: number;
 }
 const PREF_KEY = 'playalong.prefs';
 function loadPrefs(): Partial<GlobalPrefs> {
@@ -40,7 +40,7 @@ function savePrefs(): void {
   const p: GlobalPrefs = {
     accompaniment: o.accompaniment, accompanimentVolume: o.accompanimentVolume,
     solo: o.solo, soloVolume: o.soloVolume, metronome: o.metronome, metronomeVolume: o.metronomeVolume,
-    countInBars: o.countInBars, waitAtHolds: o.waitAtHolds,
+    countInBars: o.countInBars, holdMode: o.holdMode, fermataStretch: o.fermataStretch,
   };
   try {
     localStorage.setItem(PREF_KEY, JSON.stringify(p));
@@ -84,6 +84,7 @@ document.addEventListener('pointerdown', () => {
 // ---------------------------------------------------------------- Bibliothek
 async function showLibrary(): Promise<void> {
   engine.stop();
+  engine.mic.stop();
   releaseWakeLock();
   $('player').hidden = true;
   $('library').hidden = false;
@@ -299,6 +300,7 @@ async function togglePlay(): Promise<void> {
     }
     loading(false);
   }
+  if (engine.opts.holdMode === 'mic' && !engine.mic.active) await startMic();
   let from = measureStartAt(engine.position());
   if (loopOn && engine.loop) {
     if (from < engine.loop.start || from >= engine.loop.end) from = engine.loop.start;
@@ -340,7 +342,10 @@ function syncControls(s: EngineState = engine.state): void {
   if (s === 'holding') {
     const p = engine.position();
     const isCad = tl?.cadenzas.some((c) => Math.abs(c.pos - p) < 1e-6);
-    $('hold-kind').textContent = isCad ? 'Kadenz – spiel frei, dann tippen' : 'Fermate – tippen, wenn du weiter willst';
+    const mic = engine.opts.holdMode === 'mic' && engine.mic.active;
+    $('hold-kind').textContent = mic
+      ? (isCad ? '🎤 Kadenz – spiel frei, ich warte auf die Pause' : '🎤 Fermate – setz ab, dann geht es weiter')
+      : (isCad ? 'Kadenz – spiel frei, dann tippen oder Pedal' : 'Fermate – tippen oder Pedal');
   }
   $('countin').hidden = s !== 'countin';
   $<HTMLButtonElement>('btn-metronome').setAttribute('aria-pressed', String(engine.opts.metronome));
@@ -366,6 +371,11 @@ function frame(): void {
     if (el.textContent !== txt2) el.textContent = txt2;
   }
   updateTempoLabel(pos);
+  if (engine.mic.active && (!$('options').hidden || engine.state === 'holding')) {
+    const w = `${Math.min(100, Math.round(Math.sqrt(engine.micLevel()) * 250))}%`;
+    const bar = $('mic-bar');
+    if (bar.style.width !== w) bar.style.width = w;
+  }
 }
 requestAnimationFrame(frame);
 
@@ -577,11 +587,12 @@ function initOptionsUi(): void {
   $<HTMLInputElement>('opt-met').checked = o.metronome;
   $<HTMLInputElement>('opt-met-vol').value = String(Math.round(o.metronomeVolume * 100));
   $<HTMLSelectElement>('opt-countin').value = String(o.countInBars);
-  $<HTMLInputElement>('opt-wait').checked = o.waitAtHolds;
+  $<HTMLSelectElement>('opt-holdmode').value = o.holdMode;
+  $<HTMLSelectElement>('opt-stretch').value = String(o.fermataStretch);
+  updateHoldUi();
 }
-initOptionsUi();
 
-function bindCheck(id: string, key: 'accompaniment' | 'solo' | 'metronome' | 'waitAtHolds'): void {
+function bindCheck(id: string, key: 'accompaniment' | 'solo' | 'metronome'): void {
   $(id).addEventListener('change', (e) => {
     engine.setOptions({ [key]: (e.target as HTMLInputElement).checked });
     savePrefs();
@@ -597,10 +608,50 @@ function bindVol(id: string, key: 'accompanimentVolume' | 'soloVolume' | 'metron
 bindCheck('opt-acc', 'accompaniment');
 bindCheck('opt-solo', 'solo');
 bindCheck('opt-met', 'metronome');
-bindCheck('opt-wait', 'waitAtHolds');
 bindVol('opt-acc-vol', 'accompanimentVolume');
 bindVol('opt-solo-vol', 'soloVolume');
 bindVol('opt-met-vol', 'metronomeVolume');
+// Fermaten & Kadenzen
+const HOLD_HINTS: Record<HoldMode, string> = {
+  auto: 'Fermaten werden automatisch ausgehalten. Kadenzen laufen in den notierten Notenwerten im eingestellten Tempo – für freie Kadenzen besser „Mikrofon“ oder „Tippen / Pedal“ wählen.',
+  mic: 'Der Player hört über das Mikrofon zu: Er wartet auf den Fermatenton bzw. den Schlusston der Kadenz und spielt sofort weiter, wenn du ihn absetzt. Wird der Ton nicht erkannt, geht es nach einer kurzen Pause weiter (bei Kadenzen nach ca. 1 Sekunde). Ausgewertet wird nur auf dem iPad, nichts wird aufgenommen. Tippen oder Pedal geht zusätzlich immer.',
+  tap: 'Weiter geht es mit Tippen auf „Weiter“ oder die Noten, mit der Leertaste oder einem Bluetooth-Pedal.',
+};
+function updateHoldUi(): void {
+  const m = engine.opts.holdMode;
+  $('row-mic').hidden = m !== 'mic';
+  $('hold-hint').textContent = HOLD_HINTS[m]
+    + (m !== 'auto' ? ' Fermaten, bei denen du selbst nicht spielst, laufen automatisch weiter.' : '');
+  $('mic-status').textContent = engine.mic.active ? 'hört zu' : 'aus';
+}
+async function startMic(): Promise<boolean> {
+  try {
+    await engine.mic.start(engine.ctx);
+    await engine.unlock(); // Audio-Sitzung auf Aufnahme + Wiedergabe umstellen
+    updateHoldUi();
+    return true;
+  } catch (e) {
+    toast(`Kein Zugriff auf das Mikrofon – es wird auf Tippen gewartet. (${(e as Error).message})`, 5000);
+    engine.setOptions({ holdMode: 'tap' });
+    $<HTMLSelectElement>('opt-holdmode').value = 'tap';
+    savePrefs();
+    updateHoldUi();
+    return false;
+  }
+}
+$('opt-holdmode').addEventListener('change', async (e) => {
+  const m = (e.target as HTMLSelectElement).value as HoldMode;
+  engine.setOptions({ holdMode: m });
+  savePrefs();
+  if (m === 'mic') await startMic();
+  else engine.mic.stop();
+  updateHoldUi();
+});
+$('opt-stretch').addEventListener('change', (e) => {
+  engine.setOptions({ fermataStretch: +(e.target as HTMLSelectElement).value });
+  savePrefs();
+});
+
 $('opt-countin').addEventListener('change', (e) => {
   engine.setOptions({ countInBars: +(e.target as HTMLSelectElement).value });
   savePrefs();
@@ -697,6 +748,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   }).catch(() => {});
 }
 
+initOptionsUi();
 showLibrary();
 
 // Für automatische Tests und Fehlersuche (Safari-Konsole)

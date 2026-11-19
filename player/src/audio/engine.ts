@@ -1,8 +1,17 @@
 // Wiedergabe-Engine: plant Noten und Metronom mit Vorlauf über die Web Audio API.
 import type { Timeline, Hold } from '../musicxml/timeline';
 import { Sampler, Voice, createPiano, createClarinet } from './sampler';
+import { MicLevel } from './mic';
 
 export type EngineState = 'stopped' | 'countin' | 'playing' | 'holding';
+
+/**
+ * Fermaten und Kadenzen:
+ *  auto – automatisch aushalten (Länge × fermataStretch)
+ *  mic  – warten, bis der Spieler absetzt (Mikrofon)
+ *  tap  – warten auf Tippen / Pedal / Leertaste
+ */
+export type HoldMode = 'auto' | 'mic' | 'tap';
 
 export interface EngineOptions {
   accompaniment: boolean;
@@ -12,7 +21,7 @@ export interface EngineOptions {
   metronome: boolean;
   metronomeVolume: number;
   countInBars: number; // 0, 1, 2
-  waitAtHolds: boolean; // bei Fermaten/Kadenzen auf Tippen warten
+  holdMode: HoldMode;
   fermataStretch: number; // Fermate ohne Warten: Dauer × Faktor
 }
 
@@ -89,6 +98,24 @@ class TimeMap {
   }
 }
 
+interface HoldWatch {
+  since: number;
+  soloPlays: boolean;
+  nominal: number;
+  autoAt: number | null;
+  /** Erwarteter Ton (klingend, Hz): Fermatenton bzw. letzter Ton der Kadenz */
+  targetHz: number | null;
+  /** so lange muss der Zielton stabil klingen, bevor er als erkannt gilt */
+  confirmTime: number;
+  /** wait: Zielton noch nicht gehört · on: Zielton klingt */
+  phase: 'wait' | 'on';
+  matchSince: number | null;
+  notePeak: number;
+  heardPeak: number;
+  quietSince: number | null;
+  offPitchSince: number | null;
+}
+
 const LOOKAHEAD = 0.25; // Sekunden Vorlauf
 const TICK_MS = 25;
 
@@ -110,7 +137,7 @@ export class Engine {
     accompaniment: true, accompanimentVolume: 0.8,
     solo: false, soloVolume: 0.6,
     metronome: false, metronomeVolume: 0.6,
-    countInBars: 1, waitAtHolds: true, fermataStretch: 2,
+    countInBars: 1, holdMode: 'auto', fermataStretch: 2,
   };
 
   state: EngineState = 'stopped';
@@ -130,6 +157,10 @@ export class Engine {
   private clicks: { osc: OscillatorNode; start: number }[] = [];
   private timer: number | null = null;
   private stopPos = 0;
+  readonly mic = new MicLevel();
+  /** Zustand während einer Fermate/Kadenz */
+  private holdWatch: HoldWatch | null = null;
+  private holdTimer: number | null = null;
 
   onStateChange: (s: EngineState) => void = () => {};
   onLoopPass: (pass: number, tempo: number) => void = () => {};
@@ -154,7 +185,7 @@ export class Engine {
     // iOS: Wiedergabe auch bei Stummschalter („Klingeln aus“)
     try {
       const nav = navigator as unknown as { audioSession?: { type: string } };
-      if (nav.audioSession) nav.audioSession.type = 'playback';
+      if (nav.audioSession) nav.audioSession.type = this.mic.active ? 'play-and-record' : 'playback';
     } catch {
       /* nicht unterstützt */
     }
@@ -187,22 +218,26 @@ export class Engine {
   private rebuildMap(): void {
     if (!this.tl) return;
     const tl = this.tl;
-    if (this.opts.waitAtHolds) {
-      // Kadenzen ersetzen Fermaten innerhalb ihres Takts
-      const holds = [...tl.cadenzas];
-      for (const f of tl.fermatas) {
-        if (!tl.cadenzas.some((c) => f.pos >= c.pos - 1e-9 && f.pos < c.resume - 1e-9)) holds.push(f);
-      }
-      this.holds = holds.sort((a, b) => a.pos - b.pos);
+    // Kadenzen ersetzen Fermaten innerhalb ihres Takts
+    const holds = [...tl.cadenzas];
+    for (const f of tl.fermatas) {
+      if (!tl.cadenzas.some((c) => f.pos >= c.pos - 1e-9 && f.pos < c.resume - 1e-9)) holds.push(f);
+    }
+    holds.sort((a, b) => a.pos - b.pos);
+    if (this.opts.holdMode !== 'auto') {
+      this.holds = holds;
       this.map = new TimeMap(tl, []);
     } else {
+      // Fermaten aushalten; Kadenzen in den notierten Notenwerten (Länge ist sonst unbekannt)
       this.holds = [];
-      this.map = new TimeMap(tl, tl.fermatas.map((f) => ({ pos: f.pos, end: f.resume, factor: this.opts.fermataStretch })));
+      this.map = new TimeMap(tl, holds.filter((h) => h.kind === 'fermata')
+        .map((f) => ({ pos: f.pos, end: f.resume, factor: this.opts.fermataStretch })));
     }
   }
 
   setOptions(o: Partial<EngineOptions>): void {
-    const holdsChanged = o.waitAtHolds !== undefined && o.waitAtHolds !== this.opts.waitAtHolds;
+    const holdsChanged = (o.holdMode !== undefined && (o.holdMode === 'auto') !== (this.opts.holdMode === 'auto'))
+      || (o.fermataStretch !== undefined && o.fermataStretch !== this.opts.fermataStretch);
     this.opts = { ...this.opts, ...o };
     this.applyVolumes();
     if (holdsChanged) {
@@ -347,6 +382,7 @@ export class Engine {
     this.clicks = [];
     this.anchors = [];
     this.pendingHold = null;
+    this.stopHoldWatch();
     this.countIn = null;
     if (this.state !== 'stopped') {
       this.state = 'stopped';
@@ -404,11 +440,126 @@ export class Engine {
     this.held = [];
     const resume = this.pendingHold.hold.resume;
     this.pendingHold = null;
-    this.anchors = [{ audio: now + 0.03, pos: resume, factor: this.tempo }];
+    this.stopHoldWatch();
+    // sofort gemeinsam weiter (kleiner Vorlauf, damit der erste Ton sicher geplant ist)
+    this.anchors = [{ audio: now + 0.015, pos: resume, factor: this.tempo }];
     this.resetPointers(resume);
     this.state = 'playing';
     this.onStateChange(this.state);
     this.tick();
+  }
+
+  /** Spielt die eigene Stimme an der Haltestelle? */
+  private soloPlaysAt(pos: number, end: number): boolean {
+    return this.tl!.notes.some((n) => n.part === this.soloPart && n.start < end - 1e-9 && n.start + n.dur > pos + 1e-9);
+  }
+
+  /** Erwarteter Ton: bei Kadenzen der letzte Ton der eigenen Stimme, sonst der Fermatenton */
+  private targetMidi(h: Hold): number | null {
+    const solo = this.tl!.notes.filter((n) => n.part === this.soloPart);
+    if (h.kind === 'cadenza') {
+      const inCad = solo.filter((n) => n.start >= h.pos - 1e-9 && n.start < h.resume - 1e-9);
+      if (!inCad.length) return null;
+      const lastStart = Math.max(...inCad.map((n) => n.start));
+      return Math.max(...inCad.filter((n) => Math.abs(n.start - lastStart) < 1e-9).map((n) => n.midi));
+    }
+    const at = solo.filter((n) => n.start <= h.pos + 1e-9 && n.start + n.dur > h.pos + 1e-9);
+    return at.length ? Math.max(...at.map((n) => n.midi)) : null;
+  }
+
+  private startHoldWatch(now: number): void {
+    const h = this.pendingHold!.hold;
+    const a = this.anchors[this.anchors.length - 1];
+    const nominal = Math.max(0.3, this.timeOf(a, h.resume) - this.timeOf(a, h.pos));
+    const soloPlays = this.soloPlaysAt(h.pos, h.resume);
+    // Spielt die eigene Stimme nicht mit, gibt es niemanden, auf den man warten müsste
+    const autoAt = soloPlays ? null : now + nominal * this.opts.fermataStretch;
+    const tm = this.targetMidi(h);
+    // Kommt der Schlusston der Kadenz vorher schon vor (z. B. im Lauf), länger hinhören
+    let confirmTime = 0.03;
+    if (h.kind === 'cadenza' && tm !== null) {
+      const earlier = this.tl!.notes.filter((n) => n.part === this.soloPart && n.start >= h.pos - 1e-9
+        && n.start < h.resume - 1e-9 && n.midi % 12 === tm % 12);
+      confirmTime = earlier.length > 1 ? 0.2 : 0.06;
+    }
+    this.holdWatch = {
+      since: now, soloPlays, nominal, autoAt, confirmTime,
+      targetHz: tm === null ? null : 440 * Math.pow(2, (tm - 69) / 12),
+      phase: 'wait', matchSince: null, notePeak: 0, heardPeak: 0, quietSince: null, offPitchSince: null,
+    };
+    // Mikrofon: sehr häufig prüfen, damit die Begleitung sofort einsetzt
+    if (this.opts.holdMode === 'mic' && this.mic.active && soloPlays) {
+      this.holdTimer = window.setInterval(() => this.checkHold(this.ctx.currentTime), 5);
+    }
+  }
+
+  private stopHoldWatch(): void {
+    if (this.holdTimer !== null) clearInterval(this.holdTimer);
+    this.holdTimer = null;
+    this.holdWatch = null;
+  }
+
+  private checkHold(now: number): void {
+    const w = this.holdWatch;
+    if (!w || !this.pendingHold || this.state !== 'holding') return;
+    if (w.autoAt !== null && now >= w.autoAt) {
+      this.continueFromHold();
+      return;
+    }
+    if (this.opts.holdMode !== 'mic' || !this.mic.active || !w.soloPlays) return;
+    const cadenza = this.pendingHold.hold.kind === 'cadenza';
+    const { fast, level, match } = this.mic.analyse(w.targetHz);
+    if (level > w.heardPeak) w.heardPeak = level;
+    const isMatch = match > 0.8 && level > 0.01;
+
+    if (w.phase === 'wait') {
+      // auf den erwarteten Ton warten (mind. 30 ms stabil)
+      if (isMatch) {
+        if (w.matchSince === null) w.matchSince = now;
+        if (now - w.matchSince >= w.confirmTime) {
+          w.phase = 'on';
+          w.notePeak = level;
+          w.quietSince = null;
+        }
+      } else {
+        w.matchSince = null;
+      }
+      // Rückfallebene, falls der Ton nicht erkannt wird: längere Stille
+      const quiet = level < Math.max(0.006, w.heardPeak * 0.2);
+      if (quiet) {
+        if (w.quietSince === null) w.quietSince = now;
+      } else {
+        w.quietSince = null;
+      }
+      const minHold = cadenza ? 1.5 : Math.min(w.nominal, 0.8);
+      const quietNeeded = cadenza ? 1.0 : 0.5;
+      if (w.heardPeak > 0.015 && now - w.since >= minHold && w.quietSince !== null && now - w.quietSince >= quietNeeded) {
+        this.continueFromHold();
+      }
+      return;
+    }
+
+    // Zielton klingt: Ende erkennen – Pegel bricht ein (Absetzen) oder Wechsel auf einen anderen Ton (legato)
+    if (isMatch && level > w.notePeak) w.notePeak = level;
+    if (fast < Math.max(0.005, w.notePeak * 0.3)) {
+      if (w.quietSince === null) w.quietSince = now;
+    } else {
+      w.quietSince = null;
+    }
+    if (!isMatch && level > Math.max(0.01, w.notePeak * 0.3)) {
+      if (w.offPitchSince === null) w.offPitchSince = now;
+    } else {
+      w.offPitchSince = null;
+    }
+    if ((w.quietSince !== null && now - w.quietSince >= 0.04)
+      || (w.offPitchSince !== null && now - w.offPitchSince >= 0.06)) {
+      this.continueFromHold();
+    }
+  }
+
+  /** Mikrofon-Pegel (für die Anzeige) */
+  micLevel(): number {
+    return this.mic.active ? this.mic.level() : 0;
   }
 
   private click(when: number, accent: boolean, countIn = false): void {
@@ -445,7 +596,12 @@ export class Engine {
 
     if (this.pendingHold && now >= this.pendingHold.audio && this.state === 'playing') {
       this.state = 'holding';
+      this.startHoldWatch(now);
       this.onStateChange(this.state);
+    }
+    if (this.state === 'holding') {
+      this.checkHold(now);
+      return;
     }
     if (this.pendingEnd !== null && now >= this.pendingEnd) {
       this.pendingEnd = null;
@@ -455,7 +611,7 @@ export class Engine {
       this.onEnd();
       return;
     }
-    if (this.pendingHold || this.pendingEnd !== null || this.state === 'holding') return;
+    if (this.pendingHold || this.pendingEnd !== null) return;
 
     const horizon = now + LOOKAHEAD;
     let guard = 0;
