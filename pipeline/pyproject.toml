@@ -18,5 +18,12 @@ dependencies = [
 [project.scripts]
 playalong = "playalong.cli:main"
 
+# ohne Konsolenfenster (für die Desktop-Verknüpfung)
+[project.gui-scripts]
+playalong-werkstatt = "playalong.gui:gui_entry"
+
 [tool.setuptools]
 packages = ["playalong"]
+
+[tool.setuptools.package-data]
+playalong = ["web/*"]

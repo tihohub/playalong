@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play-along Werkstatt</title>
+<link rel="icon" href="/icon.png">
+<style>
+:root { --bg:#f4f1ea; --paper:#fff; --ink:#1d2b3a; --muted:#66707a; --line:#d8d2c4; --accent:#c0392b; --ok:#27ae60; --warn:#e67e22; }
+* { box-sizing:border-box; }
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+header { background:var(--ink); color:#fff; padding:14px 24px; display:flex; align-items:center; gap:12px; }
+header h1 { font-size:1.3rem; margin:0; flex:1; display:flex; align-items:center; gap:10px; }
+header img { width:32px; height:32px; border-radius:7px; }
+main { max-width:980px; margin:0 auto; padding:20px 24px 60px; display:grid; gap:18px; }
+.card { background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+.card h2 { margin:0 0 12px; font-size:1.05rem; display:flex; align-items:center; gap:10px; }
+.step { display:inline-flex; width:26px; height:26px; border-radius:50%; background:var(--ink); color:#fff; align-items:center; justify-content:center; font-size:.9rem; }
+.btn { font:inherit; min-height:40px; padding:0 16px; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:pointer; color:var(--ink); }
+.btn:hover { border-color:var(--ink); }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; font-size:1.05rem; min-height:48px; padding:0 26px; }
+.btn.primary:disabled { opacity:.45; cursor:not-allowed; }
+.btn.small { min-height:32px; padding:0 10px; font-size:.9rem; }
+.btn.ghost { background:transparent; color:#fff; border-color:rgba(255,255,255,.4); }
+.drop { border:2px dashed var(--line); border-radius:12px; padding:18px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
+.drop.over { border-color:var(--accent); background:#fff6f4; }
+.drop.has { border-style:solid; border-color:var(--ok); background:#f2fbf5; color:var(--ink); text-align:left; }
+.drop b { color:var(--ink); }
+.info { margin-top:12px; display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; align-items:center; }
+.info label { color:var(--muted); }
+input[type=text], select { font:inherit; min-height:38px; padding:0 10px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.row input[type=text] { flex:1; min-width:240px; }
+.muted { color:var(--muted); font-size:.9rem; }
+.ok { color:var(--ok); } .err { color:var(--accent); } .warn { color:var(--warn); }
+#log { font-family:ui-monospace,Consolas,monospace; font-size:.85rem; background:#f8f6f1; border-radius:8px; padding:10px 12px; white-space:pre-wrap; max-height:180px; overflow:auto; margin-top:12px; }
+.result { margin-top:12px; padding:12px 14px; border-radius:10px; }
+.result.ok { background:#f2fbf5; border:1px solid #bfe5cc; color:var(--ink); }
+.result.err { background:#fff1ef; border:1px solid #f1c3bb; color:var(--ink); }
+table { width:100%; border-collapse:collapse; }
+td, th { text-align:left; padding:8px 6px; border-bottom:1px solid #eee8dc; font-size:.95rem; }
+th { color:var(--muted); font-weight:500; font-size:.85rem; }
+.tag { font-size:.75rem; background:#eef3f7; border-radius:6px; padding:2px 6px; }
+.hidden { display:none !important; }
+.spinner { display:inline-block; width:16px; height:16px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; vertical-align:-3px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1><img src="/icon.png" alt=""> Play-along Werkstatt</h1>
+  <span class="muted" style="color:#c9d1d9" id="version"></span>
+  <button class="btn small ghost" id="quit" title="Werkstatt beenden">Beenden</button>
+</header>
+<main>
+  <!-- Zielordner -->
+  <section class="card">
+    <h2>Zielordner für die Liedpakete</h2>
+    <div class="row">
+      <input type="text" id="ziel" placeholder="z. B. G:\Meine Ablage\Apps\Playalong" spellcheck="false">
+      <button class="btn" id="ziel-waehlen">Ordner wählen …</button>
+      <button class="btn" id="ziel-speichern">Übernehmen</button>
+    </div>
+    <p class="muted" id="ziel-status"></p>
+  </section>
+
+  <!-- Partitur -->
+  <section class="card">
+    <h2><span class="step">1</span> Partitur (MusicXML)</h2>
+    <div class="drop" id="drop-partitur">Datei hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">.mxl, .musicxml oder .xml, z. B. aus MuseScore „Exportieren → MusicXML“</span></div>
+    <input type="file" id="file-partitur" accept=".mxl,.musicxml,.xml" hidden>
+    <div class="info hidden" id="score-info">
+      <label for="titel">Titel</label><input type="text" id="titel">
+      <label for="komponist">Komponist</label><input type="text" id="komponist">
+      <label for="stimme">Eigene Stimme</label><select id="stimme"></select>
+      <label for="notiert">Notiert</label>
+      <select id="notiert">
+        <option value="auto">automatisch erkennen</option>
+        <option value="in-b">in B (wie gedruckt)</option>
+        <option value="klingend">klingend → nach B transponieren</option>
+      </select>
+      <label>Umfang</label><span id="umfang"></span>
+    </div>
+  </section>
+
+  <!-- Aufnahme -->
+  <section class="card">
+    <h2><span class="step">2</span> Aufnahme (optional)</h2>
+    <div class="drop" id="drop-aufnahme">MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Ohne Aufnahme spielt der Player die Begleitung aus den Noten.</span></div>
+    <input type="file" id="file-aufnahme" accept=".mp3,.m4a,.aac,.ogg,.wav,audio/*" hidden>
+    <p class="muted hidden" id="aufnahme-hinweis">Die Aufnahme wird automatisch mit den Noten abgeglichen. Danach einen Blick in den Prüfbericht werfen.</p>
+  </section>
+
+  <!-- Bauen -->
+  <section class="card">
+    <h2><span class="step">3</span> Liedpaket bauen</h2>
+    <div class="row">
+      <button class="btn primary" id="build" disabled>Liedpaket bauen</button>
+      <button class="btn hidden" id="reset">Nächstes Lied</button>
+      <span class="muted" id="build-hint">Zuerst eine Partitur auswählen.</span>
+    </div>
+    <div id="log" class="hidden"></div>
+    <div id="result" class="result hidden"></div>
+  </section>
+
+  <!-- Vorhandene Pakete -->
+  <section class="card">
+    <h2>Vorhandene Liedpakete im Zielordner <button class="btn small" id="refresh" style="margin-left:auto">Aktualisieren</button></h2>
+    <table><thead><tr><th>Titel</th><th>Datei</th><th>Geändert</th><th></th></tr></thead><tbody id="pakete"></tbody></table>
+    <p class="muted" id="pakete-leer"></p>
+    <p class="muted">Auf dem iPad: Play-along öffnen → „Lied importieren“ → in der Dateien-App den Zielordner öffnen und das Paket antippen.</p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { partitur: null, aufnahme: null, info: null, busy: false };
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { 'X-Werkstatt': '1', ...(opts.headers || {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
+  return data;
+}
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const fmtSize = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' kB';
+
+// ---------- Zielordner
+function showZiel(cfg) {
+  $('ziel').value = cfg.ziel || '';
+  $('ziel-status').innerHTML = cfg.zielOk ? '<span class="ok">✓ Ordner gefunden.</span>'
+    : (cfg.ziel ? '<span class="err">Dieser Ordner wurde nicht gefunden.</span>' : '<span class="warn">Bitte einen Zielordner festlegen.</span>');
+  state.zielOk = cfg.zielOk;
+  updateBuild();
+  loadPakete();
+}
+$('ziel-waehlen').onclick = async () => {
+  $('ziel-status').innerHTML = '<span class="spinner"></span> Ordnerdialog ist geöffnet (evtl. hinter dem Browser) …';
+  try { showZiel(await post('/api/ziel/waehlen')); } catch (e) { $('ziel-status').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+};
+$('ziel-speichern').onclick = async () => {
+  try { showZiel(await post('/api/ziel', { ziel: $('ziel').value })); } catch (e) { $('ziel-status').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+};
+$('ziel').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('ziel-speichern').click(); });
+
+// ---------- Dateien
+function setupDrop(kind) {
+  const drop = $('drop-' + kind), input = $('file-' + kind);
+  drop.onclick = () => input.click();
+  input.onchange = () => input.files[0] && upload(kind, input.files[0]);
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) upload(kind, f); });
+}
+async function upload(kind, file) {
+  const drop = $('drop-' + kind);
+  drop.classList.remove('has');
+  drop.innerHTML = `<span class="spinner"></span> ${esc(file.name)} wird geladen …`;
+  try {
+    const res = await api('/api/upload', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'X-Kind': kind, 'Content-Type': 'application/octet-stream' }, body: file });
+    state[kind] = res.id;
+    drop.classList.add('has');
+    drop.innerHTML = `✓ <b>${esc(res.name)}</b> <span class="muted">(${fmtSize(res.size)}) – zum Ändern klicken</span>`;
+    if (kind === 'partitur') showInfo(res.info);
+    if (kind === 'aufnahme') $('aufnahme-hinweis').classList.remove('hidden');
+  } catch (e) {
+    state[kind] = null;
+    drop.innerHTML = `<span class="err">${esc(e.message)}</span><br><span class="muted">Andere Datei hierher ziehen oder klicken.</span>`;
+    if (kind === 'partitur') $('score-info').classList.add('hidden');
+  }
+  $('file-' + kind).value = '';
+  updateBuild();
+}
+function showInfo(info) {
+  state.info = info;
+  $('titel').value = info.title || '';
+  $('komponist').value = info.composer || '';
+  $('stimme').innerHTML = info.parts.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}${p.id === info.solo ? ' (erkannt)' : ''}</option>`).join('');
+  $('stimme').value = info.solo;
+  $('notiert').value = 'auto';
+  const mm = Math.floor(info.duration / 60), ss = String(info.duration % 60).padStart(2, '0');
+  $('umfang').textContent = `${info.measures} Takte` + (info.played !== info.measures ? ` (${info.played} mit Wiederholungen)` : '')
+    + `, ca. ${mm}:${ss} min, ${info.parts.length} Stimme${info.parts.length === 1 ? '' : 'n'}`
+    + (info.soloTransposed ? ', Klarinette in B notiert' : '');
+  $('score-info').classList.remove('hidden');
+}
+setupDrop('partitur');
+setupDrop('aufnahme');
+
+// ---------- Bauen
+function updateBuild() {
+  const ready = state.partitur && state.zielOk && !state.busy;
+  $('build').disabled = !ready;
+  $('build-hint').textContent = state.busy ? '' : !state.zielOk ? 'Zuerst einen Zielordner festlegen.' : !state.partitur ? 'Zuerst eine Partitur auswählen.'
+    : state.aufnahme ? 'Partitur + Aufnahme: mit Abgleich und Prüfbericht.' : 'Nur Partitur: Begleitung kommt aus den Noten.';
+}
+$('build').onclick = async () => {
+  state.busy = true; updateBuild();
+  $('result').className = 'result hidden';
+  $('log').classList.remove('hidden');
+  $('log').textContent = 'Starte …';
+  try {
+    const { job } = await post('/api/build', {
+      partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
+      stimme: $('stimme').value, notiert: $('notiert').value,
+    });
+    let st;
+    do {
+      await new Promise((r) => setTimeout(r, 400));
+      st = await api('/api/job/' + job);
+      $('log').textContent = st.log.join('\n') || 'Arbeite …';
+    } while (st.status === 'running');
+    const r = $('result');
+    if (st.status === 'done') {
+      r.className = 'result ok';
+      r.innerHTML = `<b class="ok">✓ Fertig</b> in ${st.result.seconds} s: <b>${esc(st.result.file)}</b><br><span class="muted">${esc(st.result.path)}</span>`
+        + (st.result.report ? `<br><a class="btn small" style="display:inline-flex;align-items:center;margin-top:8px" href="/bericht/${encodeURIComponent(st.result.report)}" target="_blank">Prüfbericht öffnen</a>` : '');
+      $('reset').classList.remove('hidden');
+      loadPakete();
+    } else {
+      r.className = 'result err';
+      r.innerHTML = `<b class="err">Das hat nicht geklappt:</b> ${esc(st.error)}`;
+    }
+  } catch (e) {
+    $('result').className = 'result err';
+    $('result').innerHTML = `<b class="err">Fehler:</b> ${esc(e.message)}`;
+  }
+  state.busy = false; updateBuild();
+};
+$('reset').onclick = () => {
+  for (const k of ['partitur', 'aufnahme']) {
+    state[k] = null;
+    const d = $('drop-' + k);
+    d.classList.remove('has');
+    d.innerHTML = k === 'partitur'
+      ? 'Datei hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">.mxl, .musicxml oder .xml</span>'
+      : 'MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Ohne Aufnahme spielt der Player die Begleitung aus den Noten.</span>';
+  }
+  $('score-info').classList.add('hidden');
+  $('aufnahme-hinweis').classList.add('hidden');
+  $('log').classList.add('hidden');
+  $('result').className = 'result hidden';
+  $('reset').classList.add('hidden');
+  updateBuild();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// ---------- Paketliste
+async function loadPakete() {
+  const list = await api('/api/pakete').catch(() => []);
+  $('pakete').innerHTML = list.map((p) => `<tr>
+    <td><b>${esc(p.title)}</b>${p.audio ? ' <span class="tag">MP3</span>' : ''}${p.broken ? ' <span class="tag err">beschädigt</span>' : ''}<br><span class="muted">${esc(p.composer || '')}</span></td>
+    <td class="muted">${esc(p.file)}<br>${fmtSize(p.size)}</td>
+    <td class="muted">${new Date(p.mtime * 1000).toLocaleString('de-DE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+    <td>${p.report ? `<a class="btn small" style="display:inline-flex;align-items:center" href="/bericht/${encodeURIComponent(p.report)}" target="_blank">Prüfbericht</a>` : ''}</td>
+  </tr>`).join('');
+  $('pakete-leer').textContent = list.length ? '' : 'Noch keine Liedpakete in diesem Ordner.';
+}
+$('refresh').onclick = loadPakete;
+
+// ---------- Beenden
+$('quit').onclick = async () => {
+  if (!confirm('Werkstatt beenden?')) return;
+  await post('/api/beenden').catch(() => {});
+  document.body.innerHTML = '<main><section class="card"><h2>Die Werkstatt ist beendet.</h2><p>Dieses Browserfenster kann geschlossen werden. Neu starten: Doppelklick auf „Play-along Werkstatt“.</p></section></main>';
+};
+
+// ---------- Start
+api('/api/config').then((cfg) => { $('version').textContent = 'Version ' + cfg.version; showZiel(cfg); });
+</script>
+</body>
+</html>
