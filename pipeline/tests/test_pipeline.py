@@ -71,5 +71,44 @@ class AlignTest(unittest.TestCase):
         self.assertLess(np.percentile(err, 90), 0.15, err)
 
 
+class DraftTest(unittest.TestCase):
+    def test_rohentwurf_etuede(self):
+        """Melodie-Erkennung an einer synthetischen Solo-Etüde (klingend B-Dur)."""
+        import playalong.transcribe as tr
+
+        etude = ROOT / "player" / "public" / "demo" / "etuede.musicxml"
+        tl = build_timeline(load_musicxml(etude))
+        lead = 0.5
+        captured = {}
+        orig = tr._to_musicxml
+
+        def spy(cells, *a):
+            captured["cells"] = cells
+            return orig(cells, *a)
+
+        with tempfile.TemporaryDirectory() as d:
+            wav = Path(d) / "etuede.wav"
+            synth(tl, wav, 1.0, lead)
+            tr._to_musicxml = spy
+            try:
+                draft = tr.transcribe(str(wav), "Test", progress=lambda *_: None)
+            finally:
+                tr._to_musicxml = orig
+        self.assertEqual(draft.key_fifths_concert, -2)  # B-Dur
+        self.assertAlmostEqual(draft.tempo, 92, delta=6)
+        # Anteil richtig erkannter 16tel (klingende Tonhöhe)
+        mt = draft.measure_times + [draft.end_time]
+        grid = [a + (b - a) * k / 16 for a, b in zip(mt[:-1], mt[1:]) for k in range(16)]
+        ok = tot = 0
+        for c, g in zip(captured["cells"], grid):
+            s = g + 0.02 - lead
+            truth = next((n.midi for n in tl.notes if tl.seconds(n.start) <= s < tl.seconds(n.start + n.dur)), None)
+            if truth is None:
+                continue
+            tot += 1
+            ok += c == truth
+        self.assertGreater(ok / tot, 0.7, f"{ok}/{tot}")
+
+
 if __name__ == "__main__":
     unittest.main()

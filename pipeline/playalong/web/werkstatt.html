@@ -42,6 +42,15 @@ td, th { text-align:left; padding:8px 6px; border-bottom:1px solid #eee8dc; font
 th { color:var(--muted); font-weight:500; font-size:.85rem; }
 .tag { font-size:.75rem; background:#eef3f7; border-radius:6px; padding:2px 6px; }
 .hidden { display:none !important; }
+.drop { position:relative; }
+.remove { position:absolute; right:10px; top:50%; transform:translateY(-50%); font:inherit; font-size:.85rem; border:1px solid var(--line); background:#fff; border-radius:8px; padding:4px 10px; cursor:pointer; color:var(--ink); }
+.remove:hover { border-color:var(--accent); color:var(--accent); }
+.modes { display:flex; gap:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; width:max-content; max-width:100%; }
+.modes label { padding:10px 16px; cursor:pointer; display:flex; gap:8px; align-items:center; }
+.modes label + label { border-left:1px solid var(--line); }
+.modes input { accent-color:var(--ink); }
+.modes label:has(input:checked) { background:var(--ink); color:#fff; }
+.note { background:#fff7e8; border:1px solid #f3d9a8; border-radius:10px; padding:10px 14px; font-size:.92rem; line-height:1.45; }
 .spinner { display:inline-block; width:16px; height:16px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; vertical-align:-3px; }
 @keyframes spin { to { transform:rotate(360deg); } }
 </style>
@@ -64,8 +73,18 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
     <p class="muted" id="ziel-status"></p>
   </section>
 
-  <!-- Partitur -->
+  <!-- Art des Liedpakets -->
   <section class="card">
+    <h2>Was hast du?</h2>
+    <div class="modes">
+      <label><input type="radio" name="art" value="partitur" checked> Partitur (+ optional Aufnahme)</label>
+      <label><input type="radio" name="art" value="entwurf"> Nur Aufnahme → Rohentwurf</label>
+    </div>
+    <p class="note hidden" id="entwurf-note"><b>Rohentwurf:</b> Die Werkstatt erkennt aus der Aufnahme die führende Melodie und macht daraus eine Klarinettenstimme in B. Das ist nur eine <b>Starthilfe</b>: Rhythmus, Tonart und einzelne Töne müssen fast immer in MuseScore korrigiert werden. Bei Orchestermusik springt die Erkennung oft zwischen Instrumenten. Neben dem Liedpaket wird die Stimme als MusicXML im Ordner <i>Rohentwürfe</i> gespeichert.</p>
+  </section>
+
+  <!-- Partitur -->
+  <section class="card" id="card-partitur">
     <h2><span class="step">1</span> Partitur (MusicXML)</h2>
     <div class="drop" id="drop-partitur">Datei hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">.mxl, .musicxml oder .xml, z. B. aus MuseScore „Exportieren → MusicXML“</span></div>
     <input type="file" id="file-partitur" accept=".mxl,.musicxml,.xml" hidden>
@@ -85,18 +104,24 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
 
   <!-- Aufnahme -->
   <section class="card">
-    <h2><span class="step">2</span> Aufnahme (optional)</h2>
+    <h2><span class="step" id="step-aufnahme">2</span> <span id="aufnahme-titel">Aufnahme (optional)</span></h2>
     <div class="drop" id="drop-aufnahme">MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Ohne Aufnahme spielt der Player die Begleitung aus den Noten.</span></div>
     <input type="file" id="file-aufnahme" accept=".mp3,.m4a,.aac,.ogg,.wav,audio/*" hidden>
     <p class="muted hidden" id="aufnahme-hinweis">Die Aufnahme wird automatisch mit den Noten abgeglichen. Danach einen Blick in den Prüfbericht werfen.</p>
+    <div class="info hidden" id="entwurf-info">
+      <label for="e-titel">Titel</label><input type="text" id="e-titel">
+      <label for="e-komponist">Komponist</label><input type="text" id="e-komponist">
+      <label for="e-taktart">Taktart</label>
+      <select id="e-taktart"><option value="4">4 Schläge pro Takt (4/4, 2/2)</option><option value="3">3 Schläge pro Takt (3/4)</option></select>
+    </div>
   </section>
 
   <!-- Bauen -->
   <section class="card">
-    <h2><span class="step">3</span> Liedpaket bauen</h2>
+    <h2><span class="step" id="step-bauen">3</span> Liedpaket bauen</h2>
     <div class="row">
       <button class="btn primary" id="build" disabled>Liedpaket bauen</button>
-      <button class="btn hidden" id="reset">Nächstes Lied</button>
+      <button class="btn" id="reset" title="Dateien und Eingaben leeren">Alles zurücksetzen</button>
       <span class="muted" id="build-hint">Zuerst eine Partitur auswählen.</span>
     </div>
     <div id="log" class="hidden"></div>
@@ -114,7 +139,12 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { partitur: null, aufnahme: null, info: null, busy: false };
+const state = { art: 'partitur', partitur: null, aufnahme: null, aufnahmeName: '', info: null, busy: false, zielOk: false };
+const EMPTY = {
+  partitur: 'Datei hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">.mxl, .musicxml oder .xml, z. B. aus MuseScore „Exportieren → MusicXML“</span>',
+  aufnahme: 'MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Ohne Aufnahme spielt der Player die Begleitung aus den Noten.</span>',
+  aufnahmeEntwurf: 'MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Aus dieser Aufnahme wird die Melodie erkannt.</span>',
+};
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { 'X-Werkstatt': '1', ...(opts.headers || {}) } });
@@ -144,14 +174,42 @@ $('ziel-speichern').onclick = async () => {
 };
 $('ziel').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('ziel-speichern').click(); });
 
+// ---------- Art: Partitur oder Rohentwurf
+for (const r of document.querySelectorAll('input[name=art]')) {
+  r.addEventListener('change', () => { state.art = r.value; showArt(); });
+}
+function showArt() {
+  const entwurf = state.art === 'entwurf';
+  $('card-partitur').classList.toggle('hidden', entwurf);
+  $('entwurf-note').classList.toggle('hidden', !entwurf);
+  $('aufnahme-titel').textContent = entwurf ? 'Aufnahme' : 'Aufnahme (optional)';
+  $('step-aufnahme').textContent = entwurf ? '1' : '2';
+  $('step-bauen').textContent = entwurf ? '2' : '3';
+  $('entwurf-info').classList.toggle('hidden', !(entwurf && state.aufnahme));
+  $('aufnahme-hinweis').classList.toggle('hidden', entwurf || !state.aufnahme);
+  if (!state.aufnahme) $('drop-aufnahme').innerHTML = entwurf ? EMPTY.aufnahmeEntwurf : EMPTY.aufnahme;
+  $('build').textContent = entwurf ? 'Rohentwurf erstellen' : 'Liedpaket bauen';
+  updateBuild();
+}
+
 // ---------- Dateien
 function setupDrop(kind) {
   const drop = $('drop-' + kind), input = $('file-' + kind);
-  drop.onclick = () => input.click();
-  input.onchange = () => input.files[0] && upload(kind, input.files[0]);
+  drop.addEventListener('click', (e) => { if (!e.target.closest('.remove') && !state.busy) { input.value = ''; input.click(); } });
+  input.addEventListener('change', () => { if (input.files[0]) upload(kind, input.files[0]); });
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) upload(kind, f); });
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f && !state.busy) upload(kind, f); });
+}
+function clearFile(kind) {
+  state[kind] = null;
+  const d = $('drop-' + kind);
+  d.classList.remove('has');
+  d.innerHTML = kind === 'partitur' ? EMPTY.partitur : (state.art === 'entwurf' ? EMPTY.aufnahmeEntwurf : EMPTY.aufnahme);
+  $('file-' + kind).value = '';
+  if (kind === 'partitur') { state.info = null; $('score-info').classList.add('hidden'); }
+  if (kind === 'aufnahme') { state.aufnahmeName = ''; $('aufnahme-hinweis').classList.add('hidden'); $('entwurf-info').classList.add('hidden'); }
+  updateBuild();
 }
 async function upload(kind, file) {
   const drop = $('drop-' + kind);
@@ -161,16 +219,20 @@ async function upload(kind, file) {
     const res = await api('/api/upload', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'X-Kind': kind, 'Content-Type': 'application/octet-stream' }, body: file });
     state[kind] = res.id;
     drop.classList.add('has');
-    drop.innerHTML = `✓ <b>${esc(res.name)}</b> <span class="muted">(${fmtSize(res.size)}) – zum Ändern klicken</span>`;
+    drop.innerHTML = `✓ <b>${esc(res.name)}</b> <span class="muted">(${fmtSize(res.size)}) – zum Ändern klicken oder neue Datei hierher ziehen</span>`
+      + `<button class="remove" type="button" title="Datei entfernen">✕ entfernen</button>`;
+    drop.querySelector('.remove').addEventListener('click', (e) => { e.stopPropagation(); clearFile(kind); });
     if (kind === 'partitur') showInfo(res.info);
-    if (kind === 'aufnahme') $('aufnahme-hinweis').classList.remove('hidden');
+    if (kind === 'aufnahme') {
+      state.aufnahmeName = res.name;
+      if (!$('e-titel').value) $('e-titel').value = res.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
+    }
   } catch (e) {
     state[kind] = null;
     drop.innerHTML = `<span class="err">${esc(e.message)}</span><br><span class="muted">Andere Datei hierher ziehen oder klicken.</span>`;
     if (kind === 'partitur') $('score-info').classList.add('hidden');
   }
-  $('file-' + kind).value = '';
-  updateBuild();
+  showArt();
 }
 function showInfo(info) {
   state.info = info;
@@ -190,21 +252,28 @@ setupDrop('aufnahme');
 
 // ---------- Bauen
 function updateBuild() {
-  const ready = state.partitur && state.zielOk && !state.busy;
+  const entwurf = state.art === 'entwurf';
+  const ready = state.zielOk && !state.busy && (entwurf ? state.aufnahme : state.partitur);
   $('build').disabled = !ready;
-  $('build-hint').textContent = state.busy ? '' : !state.zielOk ? 'Zuerst einen Zielordner festlegen.' : !state.partitur ? 'Zuerst eine Partitur auswählen.'
+  $('reset').disabled = state.busy;
+  $('build-hint').textContent = state.busy ? '' : !state.zielOk ? 'Zuerst einen Zielordner festlegen.'
+    : entwurf ? (state.aufnahme ? 'Melodie wird aus der Aufnahme erkannt (dauert ca. 10–30 s).' : 'Zuerst eine Aufnahme auswählen.')
+    : !state.partitur ? 'Zuerst eine Partitur auswählen.'
     : state.aufnahme ? 'Partitur + Aufnahme: mit Abgleich und Prüfbericht.' : 'Nur Partitur: Begleitung kommt aus den Noten.';
 }
 $('build').onclick = async () => {
+  const entwurf = state.art === 'entwurf';
   state.busy = true; updateBuild();
   $('result').className = 'result hidden';
   $('log').classList.remove('hidden');
   $('log').textContent = 'Starte …';
   try {
-    const { job } = await post('/api/build', {
-      partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
-      stimme: $('stimme').value, notiert: $('notiert').value,
-    });
+    const { job } = entwurf
+      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value })
+      : await post('/api/build', {
+        partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
+        stimme: $('stimme').value, notiert: $('notiert').value,
+      });
     let st;
     do {
       await new Promise((r) => setTimeout(r, 400));
@@ -215,8 +284,8 @@ $('build').onclick = async () => {
     if (st.status === 'done') {
       r.className = 'result ok';
       r.innerHTML = `<b class="ok">✓ Fertig</b> in ${st.result.seconds} s: <b>${esc(st.result.file)}</b><br><span class="muted">${esc(st.result.path)}</span>`
+        + (st.result.draft ? `<br>Noten zum Nachbearbeiten in MuseScore: <span class="muted">${esc(st.result.draft)}</span>` : '')
         + (st.result.report ? `<br><a class="btn small" style="display:inline-flex;align-items:center;margin-top:8px" href="/bericht/${encodeURIComponent(st.result.report)}" target="_blank">Prüfbericht öffnen</a>` : '');
-      $('reset').classList.remove('hidden');
       loadPakete();
     } else {
       r.className = 'result err';
@@ -229,20 +298,13 @@ $('build').onclick = async () => {
   state.busy = false; updateBuild();
 };
 $('reset').onclick = () => {
-  for (const k of ['partitur', 'aufnahme']) {
-    state[k] = null;
-    const d = $('drop-' + k);
-    d.classList.remove('has');
-    d.innerHTML = k === 'partitur'
-      ? 'Datei hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">.mxl, .musicxml oder .xml</span>'
-      : 'MP3 hierher ziehen oder <b>klicken zum Auswählen</b><br><span class="muted">Ohne Aufnahme spielt der Player die Begleitung aus den Noten.</span>';
-  }
-  $('score-info').classList.add('hidden');
-  $('aufnahme-hinweis').classList.add('hidden');
+  clearFile('partitur');
+  clearFile('aufnahme');
+  for (const id of ['titel', 'komponist', 'e-titel', 'e-komponist']) $(id).value = '';
+  $('e-taktart').value = '4';
   $('log').classList.add('hidden');
   $('result').className = 'result hidden';
-  $('reset').classList.add('hidden');
-  updateBuild();
+  showArt();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
@@ -267,6 +329,7 @@ $('quit').onclick = async () => {
 };
 
 // ---------- Start
+showArt();
 api('/api/config').then((cfg) => { $('version').textContent = 'Version ' + cfg.version; showZiel(cfg); });
 </script>
 </body>

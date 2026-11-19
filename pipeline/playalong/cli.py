@@ -63,6 +63,21 @@ def cmd_sync(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_entwurf(a: argparse.Namespace) -> int:
+    from .package import build_draft_package
+
+    ziel = a.ziel or _load_config().get("ziel")
+    if not ziel:
+        print("Kein Zielordner angegeben (--ziel ORDNER oder einmalig „playalong ziel ORDNER“).")
+        return 2
+    t = time.time()
+    print(f"Rohentwurf aus {a.aufnahme}")
+    pkg, xml = build_draft_package(a.aufnahme, ziel, title=a.titel or Path(a.aufnahme).stem,
+                                   composer=a.komponist or "", beats_per_bar=a.taktart, progress=_progress)
+    print(f"Fertig in {time.time() - t:.0f} s: {pkg}\nNoten zum Nachbearbeiten in MuseScore: {xml}")
+    return 0
+
+
 def cmd_info(a: argparse.Namespace) -> int:
     from .package import describe
 
@@ -159,6 +174,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-o", "--ausgabe", help="Ausgabedatei (Standard: <aufnahme>.sync.json)")
     s.add_argument("--bericht", help="Prüfbericht als HTML-Datei schreiben")
     s.set_defaults(func=cmd_sync)
+
+    e = sub.add_parser("entwurf", help="ohne Partitur: Melodie aus der Aufnahme als Rohentwurf erkennen")
+    e.add_argument("aufnahme")
+    e.add_argument("--titel")
+    e.add_argument("--komponist")
+    e.add_argument("--taktart", type=int, choices=[3, 4], default=4, help="Schläge pro Takt (3 oder 4, Standard 4)")
+    e.add_argument("--ziel")
+    e.set_defaults(func=cmd_entwurf)
 
     i = sub.add_parser("info", help="Partitur anzeigen: Titel, Takte, Dauer, Stimmen")
     i.add_argument("partitur")

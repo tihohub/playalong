@@ -130,6 +130,32 @@ def choose_folder(start: str) -> str:
         return ""
 
 
+def run_draft(job: Job, req: dict) -> None:
+    from .package import build_draft_package
+
+    try:
+        audio = UPLOADED.get(req.get("aufnahme", ""))
+        if not audio:
+            raise ValueError("Bitte zuerst eine Aufnahme auswählen.")
+        ziel = req.get("ziel") or ""
+        if not Path(ziel).is_dir():
+            raise ValueError(f"Zielordner nicht gefunden: {ziel or '(keiner)'}")
+        t = time.time()
+        pkg, xml = build_draft_package(audio, ziel, title=(req.get("titel") or "").strip() or audio.stem,
+                                       composer=(req.get("komponist") or "").strip(),
+                                       beats_per_bar=3 if str(req.get("taktart")) == "3" else 4,
+                                       progress=job.log.append)
+        rep = Path(ziel) / "Prüfberichte" / f"{pkg.stem}.html"
+        job.result = {"file": pkg.name, "path": str(pkg), "report": rep.name if rep.exists() else "",
+                      "draft": str(xml), "seconds": round(time.time() - t)}
+        job.status = "done"
+        _log(f"Rohentwurf: {pkg}")
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e) or e.__class__.__name__
+        job.status = "error"
+        _log("Fehler beim Rohentwurf: " + traceback.format_exc())
+
+
 def run_build(job: Job, req: dict) -> None:
     from .cli import NOTATION
     from .package import build_package
@@ -270,12 +296,13 @@ class Handler(BaseHTTPRequestHandler):
                     cfg["ziel"] = p
                     srv.save_cfg(cfg)  # type: ignore[attr-defined]
                 return self._json({"ziel": cfg.get("ziel", ""), "zielOk": bool(cfg.get("ziel")) and Path(cfg["ziel"]).is_dir(), "changed": bool(p)})
-            if path == "/api/build":
+            if path in ("/api/build", "/api/entwurf"):
                 req = self._body_json()
                 req["ziel"] = cfg.get("ziel", "")
                 job = Job()
                 JOBS[job.id] = job
-                threading.Thread(target=run_build, args=(job, req), daemon=True).start()
+                target = run_build if path == "/api/build" else run_draft
+                threading.Thread(target=target, args=(job, req), daemon=True).start()
                 return self._json({"job": job.id})
             if path == "/api/beenden":
                 self._json({"ok": True})
