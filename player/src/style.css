@@ -86,6 +86,13 @@ button, input, select { font: inherit; color: inherit; }
 .tempo { display: flex; align-items: center; gap: 6px; flex: 1 1 260px; min-width: 220px; }
 .tempo input[type=range] { flex: 1; min-width: 80px; height: 36px; }
 .tempo-label { min-width: 6.5em; font-variant-numeric: tabular-nums; font-size: .9rem; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg .btn { border: 0; border-radius: 0; min-width: 76px; }
+.seg .btn + .btn { border-left: 1px solid var(--line); }
+.seg .btn[aria-pressed="true"] { background: var(--btn-active); color: #fff; }
+/* im Original-Modus sind Einstellungen nur für die Notenbegleitung ohne Wirkung */
+.mode-original .notes-only { opacity: .45; }
+body:not(.mode-original) .only-original { display: none; }
 .loop-row { background: #fff7e8; border-radius: 10px; padding: 6px 8px; font-size: .95rem; }
 .loop-info { color: var(--muted); margin-left: auto; }
 #loop-pick.active { background: #f39c12; color: #fff; border-color: #f39c12; }

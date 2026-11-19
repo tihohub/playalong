@@ -192,6 +192,16 @@ export class Engine {
     this.applyVolumes();
   }
 
+  /** Gemeinsamer Ausgang (mit Begrenzer) – auch für die Original-Aufnahme */
+  get output(): AudioNode {
+    return this.master;
+  }
+
+  /** Metronom-/Einzähler-Klick (auch für den Original-Modus) */
+  metronomeClick(when: number, accent: boolean, countIn: boolean): void {
+    this.click(when, accent, countIn);
+  }
+
   /** Muss aus einer Nutzeraktion heraus aufgerufen werden (iOS). */
   async unlock(): Promise<void> {
     // iOS: Wiedergabe auch bei Stummschalter („Klingeln aus“)

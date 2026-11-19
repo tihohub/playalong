@@ -2,7 +2,7 @@
 
 Das Programm `playalong` baut aus einer Partitur (MusicXML) und optional einer Aufnahme (MP3) ein **Liedpaket** (`.playalong`) und legt es auf dem NAS ab. Ist eine Aufnahme dabei, wird sie automatisch **mit den Noten abgeglichen**: Für jeden Takt wird die Startzeit in der Aufnahme ermittelt (`sync.json`). Läuft unter Windows und Linux, nur auf dem Prozessor (keine Grafikkarte nötig), ohne Internet und ohne KI.
 
-> Hinweis: Den Abspielmodus „Original-Aufnahme“ bekommt der Player erst in der nächsten Ausbaustufe. Bis dahin spielt der Player wie gewohnt die Begleitung aus den Noten. Die Pakete mit Aufnahme lassen sich aber schon jetzt bauen und importieren.
+Im Player lässt sich bei Liedern mit Aufnahme oben zwischen **„Noten“** (Begleitung aus der Partitur) und **„Original“** (die Aufnahme, mit mitlaufendem Cursor) umschalten.
 
 ## 1. Einmalig: Installation auf dem Windows-Laptop
 
