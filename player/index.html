@@ -43,6 +43,10 @@
         <div class="tb-row">
           <button id="btn-back" class="btn icon" title="Zur Bibliothek" aria-label="Zur Bibliothek">‹</button>
           <div class="song-title" id="song-title"></div>
+          <div id="mode-switch" class="seg" role="group" aria-label="Begleitung" hidden>
+            <button class="btn small" data-mode="notes" aria-pressed="true">Noten</button>
+            <button class="btn small" data-mode="original" aria-pressed="false">Original</button>
+          </div>
           <div class="pos-display" id="pos-display">Takt –</div>
           <button id="btn-options" class="btn icon" title="Einstellungen" aria-label="Einstellungen">⚙︎</button>
         </div>
@@ -114,10 +118,10 @@
           </fieldset>
           <fieldset>
             <legend>Klang</legend>
-            <label class="chk"><input type="checkbox" id="opt-acc" checked /> Begleitung hören</label>
+            <label class="chk"><input type="checkbox" id="opt-acc" checked /> Begleitung hören (Noten oder Aufnahme)</label>
             <input type="range" id="opt-acc-vol" min="0" max="100" value="80" aria-label="Lautstärke Begleitung" />
-            <label class="chk"><input type="checkbox" id="opt-solo" /> Klarinettenstimme zum Anhören</label>
-            <input type="range" id="opt-solo-vol" min="0" max="100" value="60" aria-label="Lautstärke Klarinette" />
+            <label class="chk notes-only"><input type="checkbox" id="opt-solo" /> Klarinettenstimme zum Anhören</label>
+            <input type="range" class="notes-only" id="opt-solo-vol" min="0" max="100" value="60" aria-label="Lautstärke Klarinette" />
             <label class="chk"><input type="checkbox" id="opt-met" /> Metronom</label>
             <input type="range" id="opt-met-vol" min="0" max="100" value="60" aria-label="Lautstärke Metronom" />
           </fieldset>
@@ -128,14 +132,14 @@
                 <option value="0">aus</option><option value="1" selected>1 Takt</option><option value="2">2 Takte</option>
               </select>
             </div>
-            <div class="row"><span>Fermaten &amp; Kadenzen</span>
+            <div class="row notes-only"><span>Fermaten &amp; Kadenzen</span>
               <select id="opt-holdmode" class="select">
                 <option value="auto">automatisch</option>
                 <option value="mic">Mikrofon</option>
                 <option value="tap">Tippen / Pedal</option>
               </select>
             </div>
-            <div class="row" id="row-stretch"><span>Fermatenlänge</span>
+            <div class="row notes-only" id="row-stretch"><span>Fermatenlänge</span>
               <select id="opt-stretch" class="select small">
                 <option value="1.5">kurz</option>
                 <option value="2">mittel</option>
@@ -146,7 +150,8 @@
               <span class="mic-meter"><span id="mic-bar"></span></span>
               <span id="mic-status" class="hint"></span>
             </div>
-            <p class="hint" id="hold-hint"></p>
+            <p class="hint notes-only" id="hold-hint"></p>
+            <p class="hint only-original">Im Original-Modus läuft die Aufnahme bei Fermaten und Kadenzen einfach weiter.</p>
           </fieldset>
           <fieldset id="part-fieldset">
             <legend>Stimmen</legend>

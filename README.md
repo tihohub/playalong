@@ -66,6 +66,8 @@ Die App braucht die Noten als **MusicXML** (`.musicxml`, `.xml` oder `.mxl`). PD
 | ⚙︎ Einstellungen | Begleitstimmen einblenden oder stummschalten, Lautstärken, Klarinettenstimme zum Anhören, Einzähler, Notengröße, Verhalten bei Fermaten |
 | Fermate / Kadenz | Der Player hält an und wartet. Weiter mit **„Weiter“**, Tippen auf die Noten, Leertaste oder Bluetooth-Pedal. (Abschaltbar: dann wird die Fermate automatisch ausgehalten.) |
 
+**Noten | Original** (nur bei Liedpaketen mit Aufnahme, siehe [`pipeline/README.md`](pipeline/README.md)): Oben rechts neben dem Titel umschalten zwischen der Begleitung aus den Noten und der **Original-Aufnahme**. Im Original-Modus folgt der Cursor der Aufnahme. Das Tempo lässt sich von 50 bis 100 % ändern, ohne dass sich die Tonhöhe ändert. Schleife, Sprünge, Einzähler und Metronom funktionieren wie gewohnt. Bei Fermaten und Kadenzen läuft die Aufnahme einfach weiter. Die Lautstärke der Aufnahme regelt der Schieber „Begleitung hören“.
+
 Mehrtaktpausen: Die Begleitung spielt weiter, der Cursor wandert durch die Pause, oben steht die aktuelle Taktnummer.
 
 **Orchesterpartituren** (z. B. von musescore.com): Alle Stimmen außer der Klarinette werden als Begleitung mit Klavierklang gespielt, die Lautstärke wird automatisch angepasst. Unter ⚙︎ → **Begleitstimmen** kann man einzelne Stimmen zum Mitlesen einblenden („Noten“) oder stummschalten („hören“), z. B. Pauke oder Chor. Schlagzeug ohne Tonhöhen wird nicht mitgespielt. Anfangs wird nur die eigene Stimme gezeigt – mit allen Stimmen wird das Notenbild sehr lang.

@@ -1,5 +1,6 @@
 import './style.css';
 import { Engine, EngineState, HoldMode } from './audio/engine';
+import { OriginalPlayer, checkSync, ORIGINAL_MAX_TEMPO, ORIGINAL_MIN_TEMPO, type SyncData, type Transport } from './audio/original';
 import { ScoreView } from './score/view';
 import { prepareScore, PreparedScore } from './musicxml/prepare';
 import { buildTimeline, measureAt, Timeline } from './musicxml/timeline';
@@ -19,6 +20,12 @@ let tl: Timeline | null = null;
 let loopOn = false;
 let pickMode: 0 | 1 | 2 = 0; // Schleifenbereich antippen: 0 aus, 1 Start, 2 Ende
 let wakeLock: { release: () => Promise<void> } | null = null;
+/** Original-Aufnahme (falls im Liedpaket) */
+let original: OriginalPlayer | null = null;
+type Mode = 'notes' | 'original';
+let mode: Mode = 'notes';
+/** aktive Wiedergabe: Begleitung aus Noten (engine) oder Original-Aufnahme */
+let tp: Transport = engine;
 
 // ---------------------------------------------------------------- Globale Einstellungen
 interface GlobalPrefs {
@@ -83,8 +90,12 @@ document.addEventListener('pointerdown', () => {
 
 // ---------------------------------------------------------------- Bibliothek
 async function showLibrary(): Promise<void> {
-  engine.stop();
+  tp.stop();
   engine.mic.stop();
+  original?.dispose();
+  original = null;
+  tp = engine;
+  mode = 'notes';
   releaseWakeLock();
   $('player').hidden = true;
   $('library').hidden = false;
@@ -180,7 +191,11 @@ async function openSong(id: string): Promise<void> {
 
 async function loadScore(): Promise<void> {
   if (!song) return;
-  engine.stop();
+  tp.stop();
+  original?.dispose();
+  original = null;
+  tp = engine;
+  mode = 'notes';
   const st = song.settings ?? {};
   prepared = prepareScore(song.xml, { soloPartId: st.soloPart, notation: st.notation ?? song.manifest?.notation });
   tl = buildTimeline(prepared.doc);
@@ -197,8 +212,21 @@ async function loadScore(): Promise<void> {
   engine.setMutedParts(st.mutedParts ?? []);
   engine.loop = null;
   loopOn = false;
-  setTempoUi(st.tempo ?? 100);
-  engine.setTempo((st.tempo ?? 100) / 100);
+  // Original-Aufnahme vorbereiten, falls vorhanden und passend
+  if (song.audio) {
+    const problem = checkSync(tl, song.sync);
+    if (problem) {
+      toast(problem, 6000);
+    } else {
+      original = new OriginalPlayer(engine, tl, song.audio, song.sync as SyncData);
+      wire(original);
+    }
+  }
+  $('mode-switch').hidden = !original;
+  setMode(original ? (st.mode ?? 'original') : 'notes', false);
+  const startTempo = clampTempo(st.tempo ?? 100);
+  setTempoUi(startTempo);
+  tp.setTempo(startTempo / 100);
   fillJumpList();
   fillPartOptions();
   fillAccompanimentList();
@@ -284,16 +312,18 @@ function measureStartAt(pos: number): number {
 // ---------------------------------------------------------------- Wiedergabe
 async function togglePlay(): Promise<void> {
   if (!tl) return;
-  if (engine.state === 'holding') {
-    engine.continueFromHold();
+  // iOS: Audio-Element muss direkt in der Nutzeraktion freigeschaltet werden
+  if (mode === 'original') original?.prime();
+  if (tp.state === 'holding') {
+    tp.continueFromHold();
     return;
   }
-  if (engine.state !== 'stopped') {
+  if (tp.state !== 'stopped') {
     stopPlayback();
     return;
   }
   await engine.unlock();
-  if (!engine.samplesLoaded) {
+  if (mode === 'notes' && !engine.samplesLoaded) {
     loading(true, 'Klänge werden geladen …');
     try {
       await engine.loadSamples();
@@ -304,39 +334,80 @@ async function togglePlay(): Promise<void> {
     }
     loading(false);
   }
-  if (engine.opts.holdMode === 'mic' && !engine.mic.active) await startMic();
-  let from = measureStartAt(engine.position());
-  if (loopOn && engine.loop) {
-    if (from < engine.loop.start || from >= engine.loop.end) from = engine.loop.start;
-    engine.loopPass = 1;
+  if (mode === 'notes' && engine.opts.holdMode === 'mic' && !engine.mic.active) await startMic();
+  let from = measureStartAt(tp.position());
+  if (loopOn && tp.loop) {
+    if (from < tp.loop.start || from >= tp.loop.end) from = tp.loop.start;
+    tp.loopPass = 1;
     updateLoopInfo();
   }
   if (from >= tl.length - 1e-6) from = 0;
-  await engine.play(from);
+  await tp.play(from);
   requestWakeLock();
 }
 
 function stopPlayback(): void {
-  engine.stop();
-  engine.seek(measureStartAt(engine.position()));
+  tp.stop();
+  tp.seek(measureStartAt(tp.position()));
   releaseWakeLock();
-  if (song) saveSettings({ tempo: Math.round(engine.tempo * 100) });
+  if (song) saveSettings({ tempo: Math.round(tp.tempo * 100) });
 }
 
-engine.onStateChange = (s: EngineState) => syncControls(s);
-engine.onEnd = () => {
-  releaseWakeLock();
-  view?.scrollToMeasure(0);
-  toast('Ende des Stücks');
-};
-engine.onLoopPass = (pass, tempo) => {
-  setTempoUi(Math.round(tempo * 100));
-  updateLoopInfo();
-  view?.flashMeasure(tl!.measures[measureAt(tl!, engine.loop!.start)].src);
-  void pass;
-};
+/** Rückmeldungen einer Wiedergabe (Noten oder Original) an die Oberfläche anschließen */
+function wire(t: Transport): void {
+  t.onStateChange = (s: EngineState) => {
+    if (t === tp) syncControls(s);
+  };
+  t.onEnd = () => {
+    releaseWakeLock();
+    view?.scrollToMeasure(0);
+    toast('Ende des Stücks');
+  };
+  t.onLoopPass = (_pass, tempo) => {
+    setTempoUi(Math.round(tempo * 100));
+    updateLoopInfo();
+    if (t.loop) view?.flashMeasure(tl!.measures[measureAt(tl!, t.loop.start)].src);
+  };
+}
+wire(engine);
 
-function syncControls(s: EngineState = engine.state): void {
+// ---------------------------------------------------------------- Noten / Original umschalten
+function clampTempo(pct: number): number {
+  return mode === 'original'
+    ? Math.max(ORIGINAL_MIN_TEMPO * 100, Math.min(ORIGINAL_MAX_TEMPO * 100, pct))
+    : Math.max(25, Math.min(150, pct));
+}
+function setMode(m: Mode, save = true): void {
+  if (m === 'original' && !original) m = 'notes';
+  const pos = tp.position();
+  const tempo = tp.tempo;
+  tp.stop();
+  releaseWakeLock();
+  mode = m;
+  tp = m === 'original' ? original! : engine;
+  const slider = $<HTMLInputElement>('tempo');
+  slider.min = m === 'original' ? String(ORIGINAL_MIN_TEMPO * 100) : '25';
+  slider.max = m === 'original' ? String(ORIGINAL_MAX_TEMPO * 100) : '150';
+  const pct = clampTempo(Math.round(tempo * 100));
+  tp.setTempo(pct / 100);
+  setTempoUi(pct);
+  if (tl) tp.seek(measureStartAt(pos));
+  for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#mode-switch button'))) {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === m));
+  }
+  document.body.classList.toggle('mode-original', m === 'original');
+  if (tl) applyLoop();
+  syncControls();
+  if (save) saveSettings({ mode: m });
+}
+for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#mode-switch button'))) {
+  b.addEventListener('click', () => {
+    if (b.dataset.mode === 'original') original?.prime();
+    setMode(b.dataset.mode as Mode);
+  });
+}
+
+function syncControls(s: EngineState = tp.state): void {
   const b = $('btn-play');
   const active = s !== 'stopped';
   b.textContent = active ? '■' : '▶';
@@ -344,7 +415,7 @@ function syncControls(s: EngineState = engine.state): void {
   b.setAttribute('aria-label', active ? 'Stopp' : 'Abspielen');
   $('hold-overlay').hidden = s !== 'holding';
   if (s === 'holding') {
-    const p = engine.position();
+    const p = tp.position();
     const isCad = tl?.cadenzas.some((c) => Math.abs(c.pos - p) < 1e-6);
     const mic = engine.opts.holdMode === 'mic' && engine.mic.active;
     $('hold-kind').textContent = mic
@@ -359,23 +430,23 @@ function syncControls(s: EngineState = engine.state): void {
 function frame(): void {
   requestAnimationFrame(frame);
   if (!tl || !view || $('player').hidden) return;
-  const pos = engine.position();
+  const pos = tp.position();
   const mi = measureAt(tl, pos);
   const m = tl.measures[mi];
-  view.setCursor(m.src, pos - m.start, m.length, engine.state !== 'stopped');
+  view.setCursor(m.src, pos - m.start, m.length, tp.state !== 'stopped');
   const last = tl.sourceMeasures[tl.sourceMeasures.length - 1]?.label ?? '';
   const label = tl.sourceMeasures[m.src].label;
   const txt = `Takt ${label} / ${last}`;
   const pd = $('pos-display');
   if (pd.textContent !== txt) pd.textContent = txt;
-  const ci = engine.countInBeat();
+  const ci = tp.countInBeat();
   if (ci) {
     const el = $('countin');
     const txt2 = ci.beat === 0 ? '' : String(ci.beat);
     if (el.textContent !== txt2) el.textContent = txt2;
   }
   updateTempoLabel(pos);
-  if (engine.mic.active && (!$('options').hidden || engine.state === 'holding')) {
+  if (engine.mic.active && (!$('options').hidden || tp.state === 'holding')) {
     const w = `${Math.min(100, Math.round(Math.sqrt(engine.micLevel()) * 250))}%`;
     const bar = $('mic-bar');
     if (bar.style.width !== w) bar.style.width = w;
@@ -388,11 +459,11 @@ let lastTempoLabel = '';
 function setTempoUi(pct: number): void {
   $<HTMLInputElement>('tempo').value = String(pct);
   lastTempoLabel = '';
-  updateTempoLabel(engine.position());
+  updateTempoLabel(tp.position());
 }
 function updateTempoLabel(pos: number): void {
-  const pct = Math.round(engine.tempo * 100);
-  const bpm = Math.round(engine.qpmAt(pos) * engine.tempo);
+  const pct = Math.round(tp.tempo * 100);
+  const bpm = Math.round(tp.qpmAt(pos) * tp.tempo);
   const txt = `${pct} % · ♩=${bpm}`;
   if (txt !== lastTempoLabel) {
     $('tempo-label').textContent = txt;
@@ -400,32 +471,32 @@ function updateTempoLabel(pos: number): void {
   }
 }
 function changeTempo(pct: number): void {
-  pct = Math.max(25, Math.min(150, Math.round(pct)));
+  pct = clampTempo(Math.round(pct));
   $<HTMLInputElement>('tempo').value = String(pct);
-  engine.setTempo(pct / 100);
-  updateTempoLabel(engine.position());
+  tp.setTempo(pct / 100);
+  updateTempoLabel(tp.position());
 }
 $<HTMLInputElement>('tempo').addEventListener('input', (e) => changeTempo(+(e.target as HTMLInputElement).value));
-$<HTMLInputElement>('tempo').addEventListener('change', () => saveSettings({ tempo: Math.round(engine.tempo * 100) }));
+$<HTMLInputElement>('tempo').addEventListener('change', () => saveSettings({ tempo: Math.round(tp.tempo * 100) }));
 $('tempo-minus').addEventListener('click', () => {
-  changeTempo(engine.tempo * 100 - 5);
-  saveSettings({ tempo: Math.round(engine.tempo * 100) });
+  changeTempo(tp.tempo * 100 - 5);
+  saveSettings({ tempo: Math.round(tp.tempo * 100) });
 });
 $('tempo-plus').addEventListener('click', () => {
-  changeTempo(engine.tempo * 100 + 5);
-  saveSettings({ tempo: Math.round(engine.tempo * 100) });
+  changeTempo(tp.tempo * 100 + 5);
+  saveSettings({ tempo: Math.round(tp.tempo * 100) });
 });
 
 // ---------------------------------------------------------------- Bedienelemente
 $('btn-play').addEventListener('click', () => togglePlay());
-$('btn-continue').addEventListener('click', () => engine.continueFromHold());
+$('btn-continue').addEventListener('click', () => tp.continueFromHold());
 $('btn-back').addEventListener('click', () => {
-  if (song && view) saveSettings({ tempo: Math.round(engine.tempo * 100) });
+  if (song && view) saveSettings({ tempo: Math.round(tp.tempo * 100) });
   showLibrary();
 });
 $('btn-rewind').addEventListener('click', () => {
-  const p = loopOn && engine.loop ? engine.loop.start : 0;
-  engine.seek(p);
+  const p = loopOn && tp.loop ? tp.loop.start : 0;
+  tp.seek(p);
   view?.scrollToMeasure(tl!.measures[measureAt(tl!, p)].src);
 });
 $('jump').addEventListener('change', (e) => {
@@ -447,7 +518,7 @@ $('jump').addEventListener('change', (e) => {
     pos = parseFloat(v.slice(4));
   }
   if (pos === null) return;
-  engine.seek(pos);
+  tp.seek(pos);
   view?.scrollToMeasure(tl.measures[measureAt(tl, pos)].src);
 });
 
@@ -462,8 +533,8 @@ $('score-scroller').addEventListener('pointerup', (e) => {
   const dur = performance.now() - downAt.t;
   downAt = null;
   if (moved > 12 || dur > 700) return;
-  if (engine.state === 'holding') {
-    engine.continueFromHold();
+  if (tp.state === 'holding') {
+    tp.continueFromHold();
     return;
   }
   const src = view.measureAtPoint(e.clientX, e.clientY);
@@ -494,7 +565,7 @@ $('score-scroller').addEventListener('pointerup', (e) => {
   const pos = firstPosOfSource(src);
   if (pos === null) return;
   view.flashMeasure(src);
-  engine.seek(pos);
+  tp.seek(pos);
 });
 
 // Tastatur & Bluetooth-Pedale
@@ -505,9 +576,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === ' ' || e.key === 'Enter') {
     e.preventDefault();
     togglePlay();
-  } else if (['ArrowRight', 'ArrowDown', 'PageDown'].includes(e.key) && engine.state === 'holding') {
+  } else if (['ArrowRight', 'ArrowDown', 'PageDown'].includes(e.key) && tp.state === 'holding') {
     e.preventDefault();
-    engine.continueFromHold();
+    tp.continueFromHold();
   }
 });
 
@@ -516,7 +587,7 @@ function applyLoop(): void {
   if (!tl) return;
   saveSettings({ loopFrom: $<HTMLInputElement>('loop-from').value, loopTo: $<HTMLInputElement>('loop-to').value });
   if (!loopOn) {
-    engine.loop = null;
+    tp.loop = null;
     view?.showLoop(null, null);
     return;
   }
@@ -533,24 +604,24 @@ function applyLoop(): void {
   const endM = tl.measures.find((m) => m.src === to && m.start >= start - 1e-9);
   if (!endM) return;
   const incOn = $<HTMLInputElement>('loop-inc-on').checked;
-  engine.loop = {
+  tp.loop = {
     start,
     end: endM.start + endM.length,
     increase: incOn ? +$<HTMLSelectElement>('loop-inc').value : 0,
     target: +$<HTMLSelectElement>('loop-target').value,
   };
   view?.showLoop(from, to);
-  const p = engine.position();
-  if (p < engine.loop.start - 1e-9 || p >= engine.loop.end) engine.seek(engine.loop.start);
+  const p = tp.position();
+  if (p < tp.loop.start - 1e-9 || p >= tp.loop.end) tp.seek(tp.loop.start);
   updateLoopInfo();
 }
 function updateLoopInfo(): void {
   const info = $('loop-info');
-  if (!loopOn || !engine.loop) {
+  if (!loopOn || !tp.loop) {
     info.textContent = '';
     return;
   }
-  info.textContent = `Durchgang ${engine.loopPass} · ${Math.round(engine.tempo * 100)} %`;
+  info.textContent = `Durchgang ${tp.loopPass} · ${Math.round(tp.tempo * 100)} %`;
 }
 function updateLoopUi(): void {
   $('btn-loop').setAttribute('aria-pressed', String(loopOn));
@@ -566,7 +637,7 @@ $('btn-loop').addEventListener('click', () => {
   loopOn = !loopOn;
   if (loopOn && tl && !song?.settings.loopFrom) {
     // Standard: aktueller Takt + 3
-    const cur = tl.measures[measureAt(tl, engine.position())].src;
+    const cur = tl.measures[measureAt(tl, tp.position())].src;
     $<HTMLInputElement>('loop-from').value = tl.sourceMeasures[cur].label;
     $<HTMLInputElement>('loop-to').value = tl.sourceMeasures[Math.min(cur + 3, tl.sourceMeasures.length - 1)].label;
   }
@@ -599,6 +670,7 @@ function initOptionsUi(): void {
 function bindCheck(id: string, key: 'accompaniment' | 'solo' | 'metronome'): void {
   $(id).addEventListener('change', (e) => {
     engine.setOptions({ [key]: (e.target as HTMLInputElement).checked });
+    original?.updateVolume();
     savePrefs();
     syncControls();
   });
@@ -606,6 +678,7 @@ function bindCheck(id: string, key: 'accompaniment' | 'solo' | 'metronome'): voi
 function bindVol(id: string, key: 'accompanimentVolume' | 'soloVolume' | 'metronomeVolume'): void {
   $(id).addEventListener('input', (e) => {
     engine.setOptions({ [key]: +(e.target as HTMLInputElement).value / 100 });
+    original?.updateVolume();
   });
   $(id).addEventListener('change', () => savePrefs());
 }
@@ -790,7 +863,7 @@ function releaseWakeLock(): void {
   wakeLock = null;
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && engine.state !== 'stopped') stopPlayback();
+  if (document.hidden && tp.state !== 'stopped') stopPlayback();
 });
 
 // ---------------------------------------------------------------- Offline (Service Worker)
@@ -815,4 +888,4 @@ initOptionsUi();
 showLibrary();
 
 // Für automatische Tests und Fehlersuche (Safari-Konsole)
-(window as unknown as { __playalong: unknown }).__playalong = { engine, get timeline() { return tl; }, get view() { return view; } };
+(window as unknown as { __playalong: unknown }).__playalong = { engine, get timeline() { return tl; }, get view() { return view; }, get transport() { return tp; }, get original() { return original; } };

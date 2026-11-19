@@ -13,6 +13,8 @@ export interface SongSettings {
   visibleParts?: string[];
   /** stummgeschaltete Begleitstimmen */
   mutedParts?: string[];
+  /** Wiedergabe: Begleitung aus Noten oder Original-Aufnahme */
+  mode?: 'notes' | 'original';
 }
 
 export interface Song {
