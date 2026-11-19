@@ -18,24 +18,52 @@ Im Player lässt sich bei Liedern mit Aufnahme oben zwischen **„Noten“** (Be
    pip install -e .
    ```
 
-5. **Zielordner auf dem NAS festlegen** (einmalig). Den Pfad zur FRITZ!Box-Freigabe findest du im Windows-Explorer unter „Netzwerk“ → FRITZ-NAS. Beispiel:
+5. **Desktop-Verknüpfung anlegen** (im selben Fenster):
 
    ```
-   playalong ziel "\\fritz.box\FRITZ.NAS\USB-Stick\Play-along"
+   playalong verknuepfung
    ```
 
-   Der Ordner muss schon existieren.
+   Auf dem Desktop erscheint **„Play-along Werkstatt“**. Das Eingabefenster wird danach nicht mehr gebraucht.
 
-**Später wieder öffnen:** Eingabeaufforderung öffnen, dann
+Unter Linux (Mini-PC) entsprechend: `python3 -m venv .venv`, `source .venv/bin/activate`, `pip install -e .`, `playalong verknuepfung` (legt einen Eintrag im Anwendungsmenü an).
+
+### Auf eine neue Version aktualisieren
+
+1. Auf GitHub wieder **„Code“ → „Download ZIP“** und nach `C:\playalong` entpacken. Vorhandene Dateien ersetzen lassen, die Installation in `.venv` bleibt erhalten.
+2. Im `cmd`-Fenster:
+
+   ```
+   cd C:\playalong\playalong-main\pipeline
+   .venv\Scripts\activate
+   pip install -e .
+   ```
+
+## 2. Ein Lied verarbeiten mit der Werkstatt (empfohlen)
+
+1. Doppelklick auf **„Play-along Werkstatt“** auf dem Desktop. Der Browser öffnet sich mit der Werkstatt.
+2. **Zielordner** festlegen (nur beim ersten Mal): „Ordner wählen …“ und z. B. `G:\Meine Ablage\Apps\Playalong` oder die NAS-Freigabe auswählen. Der Ordnerdialog öffnet sich manchmal **hinter** dem Browserfenster.
+3. **Partitur** (`.mxl`/`.musicxml`) ins Feld 1 ziehen oder anklicken und auswählen. Titel, Komponist und die erkannte Klarinettenstimme werden angezeigt und lassen sich ändern.
+4. Optional die **Aufnahme** (MP3) ins Feld 2 ziehen.
+5. **„Liedpaket bauen“** klicken. Nach wenigen Sekunden erscheint „Fertig“ und der Knopf **„Prüfbericht öffnen“**.
+6. Für das nächste Lied **„Nächstes Lied“** klicken.
+
+Unten listet die Werkstatt alle Liedpakete im Zielordner, jeweils mit Link zum Prüfbericht. **Beenden:** oben rechts auf „Beenden“ klicken. Die Werkstatt läuft nur auf diesem Rechner und ist aus dem Netz nicht erreichbar.
+
+## 3. Ein Lied verarbeiten mit der Kommandozeile (Alternative)
+
+Eingabeaufforderung öffnen, dann:
 
 ```
 cd C:\playalong\playalong-main\pipeline
 .venv\Scripts\activate
 ```
 
-Unter Linux (Mini-PC) entsprechend: `python3 -m venv .venv`, `source .venv/bin/activate`, `pip install -e .`
+Zielordner einmalig festlegen (der Ordner muss schon existieren):
 
-## 2. Ein Lied verarbeiten
+```
+playalong ziel "G:\Meine Ablage\Apps\Playalong"
+```
 
 Am einfachsten liegen Partitur und Aufnahme in einem Arbeitsordner, z. B. `C:\Noten`.
 
@@ -73,9 +101,9 @@ Das dauert pro Lied meist nur Sekunden. Danach liegen auf dem NAS:
 playalong info "C:\Noten\Zelda.mxl"
 ```
 
-## 3. Den Abgleich prüfen (Prüfbericht)
+## 4. Den Abgleich prüfen (Prüfbericht)
 
-Den Prüfbericht (`Prüfberichte\<Titel>.html`) per Doppelklick im Browser öffnen:
+Den Prüfbericht in der Werkstatt mit „Prüfbericht öffnen“ oder per Doppelklick auf `Prüfberichte\<Titel>.html` im Browser öffnen:
 
 - **Abspielen:** An jedem Taktanfang ertönt ein kurzer Klick. Fällt der Klick auf den Taktanfang der Musik, stimmt der Abgleich.
 - **Tempokurve:** Blau ist das Tempo laut Abgleich, grau das notierte. Ritardandi und freie Stellen sieht man als Bögen. Plötzliche, einzelne Zacken deuten auf eine Fehlstelle hin.
@@ -112,3 +140,4 @@ playalong sync partitur.mxl aufnahme.mp3 --bericht bericht.html   # nur abgleich
 - `playalong/score.py`: MusicXML → Zeitleiste. **Muss zu `player/src/musicxml/timeline.ts` passen** (gleiche Regeln für Wiederholungen, Volten, D.C./D.S., Tempi), sonst stimmen die Taktindizes in `sync.json` nicht.
 - `playalong/align.py`: Abgleich (Chroma + Einsatz-Chroma + Rhythmus, zweistufiges DTW mit numba)
 - `playalong/package.py`, `playalong/report.py`, `playalong/cli.py`: Paket, Prüfbericht, Kommandozeile
+- `playalong/gui.py` + `playalong/web/werkstatt.html`: Werkstatt (lokaler Webserver nur auf 127.0.0.1, Standardbibliothek)

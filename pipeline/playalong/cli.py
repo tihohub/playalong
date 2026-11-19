@@ -85,9 +85,53 @@ def cmd_ziel(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(a: argparse.Namespace) -> int:
+    from .gui import main as gui_main
+
+    return gui_main(open_browser=not a.ohne_browser)
+
+
+def cmd_verknuepfung(a: argparse.Namespace) -> int:
+    """Desktop-Verknüpfung „Play-along Werkstatt“ anlegen (Windows; Linux: Startmenü-Eintrag)."""
+    import os
+    import subprocess
+
+    scripts = Path(sys.executable).parent
+    icon = Path(__file__).with_name("web") / "icon.ico"
+    if os.name == "nt":
+        target = scripts / "playalong-werkstatt.exe"
+        if not target.exists():
+            print(f"Nicht gefunden: {target}\nBitte zuerst im pipeline-Ordner „pip install -e .“ ausführen.")
+            return 1
+        ps = (
+            "$d=[Environment]::GetFolderPath('Desktop');"
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'Play-along Werkstatt.lnk'));"
+            "$s.TargetPath=$env:PA_TARGET; $s.IconLocation=$env:PA_ICON; $s.WorkingDirectory=$env:PA_DIR;"
+            "$s.Description='Play-along: Liedpakete bauen'; $s.Save(); Write-Output (Join-Path $d 'Play-along Werkstatt.lnk')"
+        )
+        env = dict(os.environ, PA_TARGET=str(target), PA_ICON=str(icon), PA_DIR=str(scripts))
+        res = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                             capture_output=True, text=True, env=env)
+        if res.returncode != 0:
+            print("Verknüpfung konnte nicht angelegt werden:\n" + res.stderr.strip())
+            return 1
+        print(f"Verknüpfung angelegt: {res.stdout.strip()}")
+        return 0
+    # Linux: Eintrag im Anwendungsmenü
+    apps = Path.home() / ".local" / "share" / "applications"
+    apps.mkdir(parents=True, exist_ok=True)
+    f = apps / "playalong-werkstatt.desktop"
+    f.write_text("[Desktop Entry]\nType=Application\nName=Play-along Werkstatt\n"
+                 f"Exec={scripts / 'playalong-werkstatt'}\nIcon={icon.with_suffix('.png')}\nTerminal=false\n", encoding="utf-8")
+    print(f"Menüeintrag angelegt: {f}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windows-Konsole: Umlaute und Sonderzeichen sicher ausgeben
     for s in (sys.stdout, sys.stderr):
+        if s is None:
+            continue
         try:
             s.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
@@ -123,6 +167,13 @@ def main(argv: list[str] | None = None) -> int:
     z = sub.add_parser("ziel", help="Standard-Zielordner anzeigen oder festlegen")
     z.add_argument("ordner", nargs="?")
     z.set_defaults(func=cmd_ziel)
+
+    g = sub.add_parser("gui", help="Werkstatt (Bedienoberfläche im Browser) starten")
+    g.add_argument("--ohne-browser", action="store_true", help="Browser nicht automatisch öffnen")
+    g.set_defaults(func=cmd_gui)
+
+    v = sub.add_parser("verknuepfung", help="Desktop-Verknüpfung „Play-along Werkstatt“ anlegen")
+    v.set_defaults(func=cmd_verknuepfung)
 
     a = p.parse_args(argv)
     try:
