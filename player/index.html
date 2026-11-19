@@ -119,8 +119,25 @@
                 <option value="0">aus</option><option value="1" selected>1 Takt</option><option value="2">2 Takte</option>
               </select>
             </div>
-            <label class="chk"><input type="checkbox" id="opt-wait" checked /> Bei Fermaten und Kadenzen warten, bis ich tippe</label>
-            <p class="hint">Weiter geht es mit Tippen auf „Weiter“, auf die Noten, mit der Leertaste oder einem Bluetooth-Pedal.</p>
+            <div class="row"><span>Fermaten &amp; Kadenzen</span>
+              <select id="opt-holdmode" class="select">
+                <option value="auto">automatisch</option>
+                <option value="mic">Mikrofon</option>
+                <option value="tap">Tippen / Pedal</option>
+              </select>
+            </div>
+            <div class="row" id="row-stretch"><span>Fermatenlänge</span>
+              <select id="opt-stretch" class="select small">
+                <option value="1.5">kurz</option>
+                <option value="2">mittel</option>
+                <option value="3">lang</option>
+              </select>
+            </div>
+            <div class="row" id="row-mic"><span>Mikrofon</span>
+              <span class="mic-meter"><span id="mic-bar"></span></span>
+              <span id="mic-status" class="hint"></span>
+            </div>
+            <p class="hint" id="hold-hint"></p>
           </fieldset>
           <fieldset id="part-fieldset">
             <legend>Stimmen</legend>
