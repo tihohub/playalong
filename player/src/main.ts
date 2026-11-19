@@ -236,7 +236,7 @@ async function loadScore(): Promise<void> {
   updateLoopUi();
   $('score-scroller').scrollTop = 0;
   syncControls();
-  if (prepared.parts.length === 1 && !engine.opts.metronome) {
+  if (prepared.parts.length === 1 && !original && !engine.opts.metronome) {
     toast('Stück ohne Begleitung – tipp auf „Metronom“, wenn du einen Takt brauchst.', 4000);
   }
 }

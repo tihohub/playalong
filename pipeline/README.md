@@ -50,6 +50,15 @@ Unter Linux (Mini-PC) entsprechend: `python3 -m venv .venv`, `source .venv/bin/a
 
 Unten listet die Werkstatt alle Liedpakete im Zielordner, jeweils mit Link zum Prüfbericht. **Beenden:** oben rechts auf „Beenden“ klicken. Die Werkstatt läuft nur auf diesem Rechner und ist aus dem Netz nicht erreichbar.
 
+### Nur eine Aufnahme, keine Noten? Rohentwurf
+
+In der Werkstatt oben „**Nur Aufnahme → Rohentwurf**“ wählen, die MP3 hineinziehen, Titel und Taktart prüfen und „**Rohentwurf erstellen**“ klicken. Die Werkstatt erkennt die führende Melodie und macht daraus eine Klarinettenstimme in B:
+
+- `<Titel> (Rohentwurf).playalong`: sofort im Player nutzbar (Original-Modus mit der Aufnahme)
+- `Rohentwürfe\<Titel> (Rohentwurf).musicxml`: zum **Nachbearbeiten in MuseScore**; danach als normale Partitur wieder durch die Werkstatt schicken
+
+Das ist ausdrücklich nur eine **Starthilfe**. Bei einer klar hörbaren Melodie stimmen viele Töne, aber Rhythmus, Tonart und Takteinteilung müssen fast immer korrigiert werden. Bei Orchestermusik springt die Erkennung zwischen Instrumenten. Getestet: synthetische Solo-Etüde 82 % richtige Töne (pro 16tel), Klarinette mit Klavier 76 %, MuseScore-Orchesteraufnahme deutlich schlechter. Kommandozeile: `playalong entwurf aufnahme.mp3 --titel "…" --taktart 4`.
+
 ## 3. Ein Lied verarbeiten mit der Kommandozeile (Alternative)
 
 Eingabeaufforderung öffnen, dann:
@@ -141,3 +150,4 @@ playalong sync partitur.mxl aufnahme.mp3 --bericht bericht.html   # nur abgleich
 - `playalong/align.py`: Abgleich (Chroma + Einsatz-Chroma + Rhythmus, zweistufiges DTW mit numba)
 - `playalong/package.py`, `playalong/report.py`, `playalong/cli.py`: Paket, Prüfbericht, Kommandozeile
 - `playalong/gui.py` + `playalong/web/werkstatt.html`: Werkstatt (lokaler Webserver nur auf 127.0.0.1, Standardbibliothek)
+- `playalong/transcribe.py`: Rohentwurf (Beat-Tracking, Melodie per harmonischer Summierung, Tonart nach Krumhansl)

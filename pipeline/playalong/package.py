@@ -34,7 +34,7 @@ def parts(root: ET.Element) -> list[tuple[str, str]]:
 def build_package(score_path: str | Path, audio_path: str | Path | None, out_dir: str | Path, *,
                   title: str | None = None, composer: str | None = None, solo_part: str | None = None,
                   notation: str | None = None, sync: bool = True, report: bool = True,
-                  progress=print) -> Path:
+                  progress=print, precomputed=None) -> Path:
     score_path = Path(score_path)
     out_dir = Path(out_dir)
     if not out_dir.is_dir():
@@ -72,10 +72,10 @@ def build_package(score_path: str | Path, audio_path: str | Path | None, out_dir
             raise ValueError(f"Unbekanntes Audioformat: {ext} (erlaubt: {', '.join(sorted(AUDIO_TYPES))})")
         audio_name = f"original{ext}"
         manifest["audio"] = audio_name
-        if sync:
+        if precomputed is not None or sync:
             from .align import align, sync_json
 
-            res = align(tl, str(audio_path), progress=progress)
+            res = precomputed if precomputed is not None else align(tl, str(audio_path), progress=progress)
             sync_data = sync_json(tl, res, audio_name)
             manifest["sync"] = "sync.json"
 
@@ -111,6 +111,33 @@ def build_package(score_path: str | Path, audio_path: str | Path | None, out_dir
         rep = write_report(tl, res, str(audio_path), rep_dir / f"{base}.html", title=title)
         progress(f"Prüfbericht: {rep}")
     return target
+
+
+def build_draft_package(audio_path: str | Path, out_dir: str | Path, *, title: str, composer: str = "",
+                        beats_per_bar: int = 4, progress=print) -> tuple[Path, Path]:
+    """Rohentwurf: Melodie aus der Aufnahme erkennen, als Klarinettenstimme speichern und
+    zusammen mit der Aufnahme als Liedpaket ablegen. Gibt (Paket, MusicXML-Entwurf) zurück."""
+    import numpy as np
+
+    from .align import SyncResult
+    from .transcribe import transcribe
+
+    out_dir = Path(out_dir)
+    if not out_dir.is_dir():
+        raise FileNotFoundError(f"Zielordner nicht gefunden: {out_dir}")
+    title = title.strip() or Path(audio_path).stem
+    full_title = f"{title} (Rohentwurf)"
+    d = transcribe(str(audio_path), full_title, composer, beats_per_bar=beats_per_bar, progress=progress)
+    draft_dir = out_dir / "Rohentwürfe"
+    draft_dir.mkdir(exist_ok=True)
+    xml_path = draft_dir / f"{safe_name(full_title)}.musicxml"
+    xml_path.write_text(d.musicxml, encoding="utf-8")
+    progress(f"Noten-Entwurf für MuseScore: {xml_path}")
+    res = SyncResult(measure_times=d.measure_times, end_time=d.end_time, audio_duration=d.audio_duration,
+                     measure_cost=[0.0] * len(d.measure_times), path=np.zeros((0, 2)))
+    pkg = build_package(xml_path, audio_path, out_dir, title=full_title, composer=composer,
+                        notation="transposed", progress=progress, precomputed=res)
+    return pkg, xml_path
 
 
 def describe(score_path: str | Path) -> str:
