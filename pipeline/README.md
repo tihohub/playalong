@@ -30,6 +30,12 @@ Unter Linux (Mini-PC) entsprechend: `python3 -m venv .venv`, `source .venv/bin/a
 
 ### Auf eine neue Version aktualisieren
 
+**In der Werkstatt:** Gibt es auf GitHub eine neue Version, erscheint oben die Karte **„Neue Version verfügbar“**. Ein Klick auf **„Jetzt aktualisieren“** lädt sie herunter, spielt sie ein (bei Bedarf samt neuer Bibliotheken) und startet die Werkstatt neu. Zielordner, Einstellungen und Liedpakete bleiben erhalten. Beim allerersten Mal heißt die Karte „Aktualisierung einrichten“: einmal klicken, danach werden neue Versionen automatisch angezeigt.
+
+Die Werkstatt fragt dafür nur bei GitHub nach, und nur solange sie geöffnet ist. Ohne Internet funktioniert alles andere wie gewohnt.
+
+**Von Hand** (falls die Werkstatt einmal nicht startet):
+
 1. Auf GitHub wieder **„Code“ → „Download ZIP“** und nach `C:\playalong` entpacken. Vorhandene Dateien ersetzen lassen, die Installation in `.venv` bleibt erhalten.
 2. Im `cmd`-Fenster:
 
@@ -150,4 +156,5 @@ playalong sync partitur.mxl aufnahme.mp3 --bericht bericht.html   # nur abgleich
 - `playalong/align.py`: Abgleich (Chroma + Einsatz-Chroma + Rhythmus, zweistufiges DTW mit numba)
 - `playalong/package.py`, `playalong/report.py`, `playalong/cli.py`: Paket, Prüfbericht, Kommandozeile
 - `playalong/gui.py` + `playalong/web/werkstatt.html`: Werkstatt (lokaler Webserver nur auf 127.0.0.1, Standardbibliothek)
+- `playalong/update.py`: Selbst-Aktualisierung aus GitHub (Commit-Stand von `pipeline/` auf `main`, Datei `.installierte-version.json`)
 - `playalong/transcribe.py`: Rohentwurf (Beat-Tracking, Melodie per harmonischer Summierung, Tonart nach Krumhansl)

@@ -103,7 +103,7 @@ def cmd_ziel(a: argparse.Namespace) -> int:
 def cmd_gui(a: argparse.Namespace) -> int:
     from .gui import main as gui_main
 
-    return gui_main(open_browser=not a.ohne_browser)
+    return gui_main(open_browser=not a.ohne_browser, port=a.port, restart=a.neustart)
 
 
 def cmd_verknuepfung(a: argparse.Namespace) -> int:
@@ -193,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
 
     g = sub.add_parser("gui", help="Werkstatt (Bedienoberfläche im Browser) starten")
     g.add_argument("--ohne-browser", action="store_true", help="Browser nicht automatisch öffnen")
+    g.add_argument("--port", type=int, default=8765, help=argparse.SUPPRESS)
+    g.add_argument("--neustart", action="store_true", help=argparse.SUPPRESS)
     g.set_defaults(func=cmd_gui)
 
     v = sub.add_parser("verknuepfung", help="Desktop-Verknüpfung „Play-along Werkstatt“ anlegen")

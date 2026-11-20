@@ -62,6 +62,17 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
   <button class="btn small ghost" id="quit" title="Werkstatt beenden">Beenden</button>
 </header>
 <main>
+  <!-- Aktualisierung -->
+  <section class="card hidden" id="update-card">
+    <h2>🔄 <span id="update-title">Neue Version verfügbar</span></h2>
+    <p id="update-text" class="muted"></p>
+    <div class="row">
+      <button class="btn primary" id="update-btn">Jetzt aktualisieren</button>
+      <span class="muted" id="update-hint">Dauert meist unter einer Minute. Liedpakete und Einstellungen bleiben erhalten.</span>
+    </div>
+    <div id="update-log" class="hidden" style="font-family:ui-monospace,Consolas,monospace;font-size:.85rem;background:#f8f6f1;border-radius:8px;padding:10px 12px;white-space:pre-wrap;margin-top:12px"></div>
+  </section>
+
   <!-- Zielordner -->
   <section class="card">
     <h2>Zielordner für die Liedpakete</h2>
@@ -328,8 +339,55 @@ $('quit').onclick = async () => {
   document.body.innerHTML = '<main><section class="card"><h2>Die Werkstatt ist beendet.</h2><p>Dieses Browserfenster kann geschlossen werden. Neu starten: Doppelklick auf „Play-along Werkstatt“.</p></section></main>';
 };
 
+// ---------- Aktualisierung
+const fmtDay = (iso) => new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
+async function checkUpdate() {
+  let u;
+  try { u = await api('/api/update'); } catch { return; }
+  const inst = u.installed || {};
+  if (inst.date) $('version').textContent += ` · Stand ${fmtDay(inst.date)}`;
+  if (!u.ok) { $('version').title = u.error || ''; return; }
+  if (!u.available || !u.writable) return;
+  $('update-card').classList.remove('hidden');
+  if (!inst.sha) {
+    $('update-title').textContent = 'Aktualisierung einrichten';
+    $('update-text').textContent = `Die installierte Version ist noch nicht registriert. Einmal aktualisieren, danach meldet die Werkstatt neue Versionen automatisch. Neueste Version vom ${fmtDay(u.latest.date)}.`;
+  } else {
+    $('update-text').textContent = `Neu vom ${fmtDay(u.latest.date)}: ${u.latest.message}`;
+  }
+}
+$('update-btn').onclick = async () => {
+  if (state.busy) return;
+  state.busy = true; updateBuild();
+  $('update-btn').disabled = true;
+  $('update-log').classList.remove('hidden');
+  $('update-log').textContent = 'Starte …';
+  try {
+    const before = (await api('/api/ping')).boot;
+    const { job } = await post('/api/update');
+    let st;
+    do {
+      await new Promise((r) => setTimeout(r, 500));
+      st = await api('/api/job/' + job);
+      $('update-log').textContent = st.log.join('\n') || 'Arbeite …';
+    } while (st.status === 'running');
+    if (st.status === 'error') throw new Error(st.error);
+    // auf die neu gestartete Werkstatt warten, dann Seite neu laden
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try { const p = await api('/api/ping'); if (p.boot !== before) { location.reload(); return; } } catch { /* startet noch */ }
+    }
+    throw new Error('Die Werkstatt hat sich nicht neu gestartet. Bitte über die Desktop-Verknüpfung neu öffnen.');
+  } catch (e) {
+    $('update-log').textContent += `\n\nFehler: ${e.message}`;
+    $('update-btn').disabled = false;
+    state.busy = false; updateBuild();
+  }
+};
+
 // ---------- Start
 showArt();
+checkUpdate();
 api('/api/config').then((cfg) => { $('version').textContent = 'Version ' + cfg.version; showZiel(cfg); });
 </script>
 </body>
