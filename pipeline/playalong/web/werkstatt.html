@@ -124,6 +124,18 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
       <label for="e-komponist">Komponist</label><input type="text" id="e-komponist">
       <label for="e-taktart">Taktart</label>
       <select id="e-taktart"><option value="4">4 Schläge pro Takt (4/4, 2/2)</option><option value="3">3 Schläge pro Takt (3/4)</option></select>
+      <label for="e-instrument">Melodie-Instrument</label>
+      <select id="e-instrument">
+        <option value="auto">automatisch erkennen</option>
+        <option value="gezupft">gezupft / angeschlagen (Banjo, Mandoline, Gitarre, Klavier)</option>
+        <option value="gehalten">gehalten (Bläser, Streicher, Gesang)</option>
+      </select>
+      <label for="e-lage">Melodie liegt</label>
+      <select id="e-lage">
+        <option value="auto">automatisch (meist über der Begleitung)</option>
+        <option value="hoch">eher hoch</option>
+        <option value="tief">eher tief</option>
+      </select>
     </div>
   </section>
 
@@ -280,7 +292,7 @@ $('build').onclick = async () => {
   $('log').textContent = 'Starte …';
   try {
     const { job } = entwurf
-      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value })
+      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value, instrument: $('e-instrument').value, lage: $('e-lage').value })
       : await post('/api/build', {
         partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
         stimme: $('stimme').value, notiert: $('notiert').value,
@@ -296,6 +308,7 @@ $('build').onclick = async () => {
       r.className = 'result ok';
       r.innerHTML = `<b class="ok">✓ Fertig</b> in ${st.result.seconds} s: <b>${esc(st.result.file)}</b><br><span class="muted">${esc(st.result.path)}</span>`
         + (st.result.draft ? `<br>Noten zum Nachbearbeiten in MuseScore: <span class="muted">${esc(st.result.draft)}</span>` : '')
+        + (st.result.erkennung ? sicherheit(st.result.erkennung) : '')
         + (st.result.report ? `<br><a class="btn small" style="display:inline-flex;align-items:center;margin-top:8px" href="/bericht/${encodeURIComponent(st.result.report)}" target="_blank">Prüfbericht öffnen</a>` : '');
       loadPakete();
     } else {
@@ -308,11 +321,21 @@ $('build').onclick = async () => {
   }
   state.busy = false; updateBuild();
 };
+function sicherheit(e) {
+  const art = e.mode === 'gezupft' ? 'gezupft/angeschlagen' : 'gehalten';
+  if (e.label === 'unsicher') {
+    return `<div class="note" style="margin-top:10px"><b>⚠ Erkennung unsicher.</b> Die Melodie war in der Aufnahme kaum von der Begleitung zu trennen (erkannt als ${art}). Der Entwurf enthält vermutlich viele falsche Töne. Tipp: „Melodie-Instrument“ und „Melodie liegt“ anders einstellen und erneut versuchen.</div>`;
+  }
+  const color = e.label === 'gut' ? 'ok' : 'warn';
+  return `<br>Sicherheit der Erkennung: <b class="${color}">${e.label}</b> <span class="muted">(Melodie erkannt als ${art})</span>`;
+}
 $('reset').onclick = () => {
   clearFile('partitur');
   clearFile('aufnahme');
   for (const id of ['titel', 'komponist', 'e-titel', 'e-komponist']) $(id).value = '';
   $('e-taktart').value = '4';
+  $('e-instrument').value = 'auto';
+  $('e-lage').value = 'auto';
   $('log').classList.add('hidden');
   $('result').className = 'result hidden';
   showArt();

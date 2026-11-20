@@ -5,10 +5,17 @@ ungenau). Ergebnis muss in MuseScore nachbearbeitet werden.
 
 Vorgehen (nur CPU, nur librosa/numpy):
 1. Schläge und Tempo erkennen (Beat-Tracking), daraus Takte (4/4 oder 3/4) und ein 16tel-Raster.
-2. Melodie per harmonischer Summierung über einer Drittelton-CQT: je Zeitpunkt die Tonhöhe,
-   deren Grundton + Obertöne zusammen am stärksten klingen (im Klarinettenumfang).
-3. Pro 16tel die häufigste Tonhöhe, gleiche Töne zusammenfassen.
-4. Tonart schätzen (Krumhansl), MusicXML in B-Notation schreiben.
+2. Drittelton-Spektrum (CQT): Tonhöhen, die fast das ganze Stück über auffällig laut liegen
+   (Bass, Orgelpunkt, Akkordteppich), werden auf ihren eigenen typischen Pegel gedämpft.
+   Normale Begleitung bleibt unverändert, damit die Melodie nicht mit ihr verwechselt wird.
+3. Harmonische Summierung (Grundton + Obertöne) im Klarinettenumfang, mit leichter Vorliebe
+   für die gewählte Lage (Melodien liegen meist über der Begleitung).
+4a. „gehalten“ (Bläser, Streicher, Gesang): je Zeitpunkt der stärkste Kandidat, pro 16tel
+    Mehrheitsentscheidung.
+4b. „gezupft“ (Banjo, Mandoline, Gitarre, Klavier): Töne beginnen an hörbaren Anschlägen;
+    je Anschlag zählt die Tonhöhe, deren Energie dort neu einsetzt.
+    „automatisch“ rechnet beide und nimmt das eindeutigere Ergebnis.
+5. Tonart schätzen (Krumhansl), MusicXML in B-Notation schreiben, Sicherheit angeben.
 Die Taktzeiten sind aus Schritt 1 bekannt -> sync.json ohne weiteren Abgleich.
 """
 from __future__ import annotations
@@ -23,9 +30,14 @@ HOP = 256
 BINS_PER_SEMI = 3
 MIDI_LO = 50  # klingend D3 (tiefstes E der B-Klarinette)
 MIDI_HI = 96  # klingend C7
+MIDI_EXT = MIDI_LO
 HARMONICS = (1, 2, 3, 4)
-VOICE_PCT = 20  # Schwelle für „es klingt etwas“ (Perzentil): niedriger = mehr Töne, aber auch mehr falsche
 H_WEIGHTS = (1.0, 0.6, 0.45, 0.3)
+VOICE_PCT = 20  # Schwelle für „es klingt etwas“ (Perzentil): niedriger = mehr Töne, aber auch mehr falsche
+DRONE = 50.0  # ab dem Wievielfachen des üblichen Pegels gilt ein Dauerton als „Liegeton“
+LAGE_PRIOR = {"auto": 0.15, "hoch": 0.45, "tief": -0.3}  # Vorliebe je Oktave über/unter C5
+INSTRUMENTE = ("auto", "gezupft", "gehalten")
+PLUCK_DECAY = 0.75  # Melodietöne fallen nach 0,2 s unter diesen Anteil -> „gezupft“
 
 STEP_SHARP = ["C", "C", "D", "D", "E", "F", "F", "G", "G", "A", "A", "B"]
 ALT_SHARP = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
@@ -47,30 +59,142 @@ class Draft:
     key_fifths_concert: int
     n_notes: int
     voiced_ratio: float
+    mode: str  # tatsächlich verwendet: „gezupft“ oder „gehalten“
+    confidence: float  # 0..1
+    confidence_label: str  # gut / mittel / unsicher
 
 
-def _melody(y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Gibt (Zeiten, MIDI-Tonhöhe je Bild oder nan, Stärke) zurück."""
-    import librosa
+# --------------------------------------------------------------------------- Merkmale
 
-    fmin = librosa.midi_to_hz(MIDI_LO)
-    n_semis = MIDI_HI - MIDI_LO + 1 + int(np.ceil(12 * np.log2(max(HARMONICS)))) + 1
-    C = np.abs(librosa.cqt(y, sr=SR, hop_length=HOP, fmin=fmin, n_bins=n_semis * BINS_PER_SEMI,
-                           bins_per_octave=12 * BINS_PER_SEMI))
-    C = np.log1p(10 * C / (C.max() + 1e-9))
-    n_cand = (MIDI_HI - MIDI_LO + 1) * BINS_PER_SEMI
-    sal = np.zeros((n_cand, C.shape[1]))
+def _harmonic_sum(L: np.ndarray, n_cand: int) -> np.ndarray:
+    sal = np.zeros((n_cand, L.shape[1]))
     for h, w in zip(HARMONICS, H_WEIGHTS):
         off = int(round(12 * np.log2(h) * BINS_PER_SEMI))
-        sal += w * C[off:off + n_cand]
-    # je Zeitpunkt der stärkste Kandidat; „keine Melodie“, wenn es zu leise ist.
-    # Geglättet wird anschließend durch die Mehrheitsentscheidung pro 16tel.
+        sal += w * L[off:off + n_cand]
+    return sal
+
+
+def _restrict(sal_ext: np.ndarray, lage: str) -> np.ndarray:
+    """Nur Kandidaten im Klarinettenumfang, gewichtet nach Lage."""
+    a = (MIDI_LO - MIDI_EXT) * BINS_PER_SEMI
+    sal = sal_ext[a:a + (MIDI_HI - MIDI_LO + 1) * BINS_PER_SEMI]
+    midi = MIDI_LO + np.arange(sal.shape[0]) / BINS_PER_SEMI
+    prior = np.exp(LAGE_PRIOR.get(lage, 0.15) * (midi - 72) / 12)
+    return sal * prior[:, None]
+
+
+def _clarity(col: np.ndarray, best: int) -> float:
+    """Wie deutlich der beste Kandidat vor dem nächstbesten (außerhalb ±1 Halbton) liegt, 0..1."""
+    v = col[best]
+    if v <= 0:
+        return 0.0
+    mask = np.ones(len(col), bool)
+    mask[max(0, best - BINS_PER_SEMI):best + BINS_PER_SEMI + 1] = False
+    second = col[mask].max() if mask.any() else 0.0
+    return float(max(0.0, (v - second) / v))
+
+
+def _spectra(y: np.ndarray, lage: str):
+    """Gibt (Zeiten, aufgehellte Salienz, Anschlags-Salienz) im Klarinettenumfang zurück."""
+    import librosa
+
+    n_cand_ext = (MIDI_HI - MIDI_EXT + 1) * BINS_PER_SEMI
+    top = int(np.ceil(12 * np.log2(max(HARMONICS)))) * BINS_PER_SEMI + 1
+    C = np.abs(librosa.cqt(y, sr=SR, hop_length=HOP, fmin=librosa.midi_to_hz(MIDI_EXT),
+                           n_bins=n_cand_ext + top, bins_per_octave=12 * BINS_PER_SEMI))
+    # Liegetöne dämpfen: nur Tonhöhen, deren Dauerpegel weit über dem üblichen liegt
+    med = np.median(C, axis=1, keepdims=True)
+    ref = np.maximum(med, DRONE * np.median(med)) + 1e-9
+    L = np.log1p(C / ref)
+    sal = _restrict(_harmonic_sum(L, n_cand_ext), lage)
+    # Anschläge: Zunahme der (nicht aufgehellten) Energie über ca. 3 Bilder
+    Lr = np.log1p(10 * C / (C.max() + 1e-9))
+    lag = 3
+    D = np.maximum(0, Lr - np.concatenate([Lr[:, :lag], Lr[:, :-lag]], axis=1))
+    att = _restrict(_harmonic_sum(D, n_cand_ext), lage)
+    times = librosa.frames_to_time(np.arange(C.shape[1]), sr=SR, hop_length=HOP)
+    return times, sal, att
+
+
+# --------------------------------------------------------------------------- Modus „gehalten“
+
+def _cells_held(times, sal, grid) -> tuple[list, list, float]:
     frame_max = sal.max(axis=0)
     thr = np.percentile(frame_max, VOICE_PCT)
     best = sal.argmax(axis=0)
-    midi = np.where(frame_max > thr, MIDI_LO + best / BINS_PER_SEMI, np.nan)
-    times = librosa.frames_to_time(np.arange(len(midi)), sr=SR, hop_length=HOP)
-    return times, midi, frame_max
+    voiced = frame_max > thr
+    midi = np.where(voiced, MIDI_LO + best / BINS_PER_SEMI, np.nan)
+    clar = [_clarity(sal[:, t], best[t]) for t in np.nonzero(voiced)[0][::4]]
+    cells: list[int | None] = []
+    for a, b in zip(grid[:-1], grid[1:]):
+        sel = (times >= a) & (times < b)
+        vals = midi[sel]
+        v = vals[~np.isnan(vals)]
+        if len(vals) == 0 or len(v) < 0.5 * len(vals):
+            cells.append(None)
+            continue
+        r = np.round(v).astype(int)
+        cells.append(int(np.bincount(r - MIDI_LO).argmax() + MIDI_LO))
+    for i in range(1, len(cells) - 1):  # einzelne Ausreißer zwischen gleichen Tönen glätten
+        if cells[i - 1] is not None and cells[i - 1] == cells[i + 1] and cells[i] != cells[i - 1]:
+            cells[i] = cells[i - 1]
+    starts = [i == 0 or cells[i] != cells[i - 1] for i in range(len(cells))]
+    return cells, starts, float(np.mean(clar)) if clar else 0.0
+
+
+# --------------------------------------------------------------------------- Modus „gezupft“
+
+def _cells_plucked(y, times, sal, att, grid) -> tuple[list, list, float, float]:
+    import librosa
+
+    on = librosa.onset.onset_detect(y=y, sr=SR, hop_length=HOP, units="frames", backtrack=False)
+    if len(on) == 0:
+        return [None] * (len(grid) - 1), [False] * (len(grid) - 1), 0.0, 1.0
+    win = 4  # ca. 45 ms nach dem Anschlag
+    notes = []
+    for f in on:
+        a = att[:, f:f + win].max(axis=1)
+        s_ = sal[:, f:f + 3 * win].mean(axis=1)
+        score = a / (a.max() + 1e-9) + 0.5 * s_ / (s_.max() + 1e-9)
+        best = int(score.argmax())
+        notes.append((f, best, float(a[best]), _clarity(score, best)))
+    strength = np.array([n[2] for n in notes])
+    keep = strength >= 0.3 * np.percentile(strength, 90)  # Schlagzeug-/Bass-Anschläge ohne Melodieanteil weglassen
+    notes = [n for n, k in zip(notes, keep) if k]
+    n_cells = len(grid) - 1
+    cells: list[int | None] = [None] * n_cells
+    starts = [False] * n_cells
+    beat = np.median(np.diff(grid)) * 4
+    for k, (f, best, _, _) in enumerate(notes):
+        t0 = times[f]
+        t1 = times[notes[k + 1][0]] if k + 1 < len(notes) else t0 + beat
+        t1 = min(t1, t0 + 2 * beat)  # gezupfte Töne klingen ab
+        s = int(np.argmin(np.abs(grid[:-1] - t0)))
+        e = max(s + 1, int(np.argmin(np.abs(grid[:-1] - t1))))
+        pitch = int(round(MIDI_LO + best / BINS_PER_SEMI))
+        for i in range(s, min(e, n_cells)):
+            cells[i] = pitch
+            starts[i] = i == s
+    conf = float(np.mean([n[3] for n in notes])) if notes else 0.0
+    # Abklingen: Pegel des Tons ca. 0,2 s nach dem Anschlag im Verhältnis zum Anschlag.
+    # Nur Töne, nach denen mindestens 0,3 s lang kein neuer Anschlag kommt (sonst misst man den nächsten Ton).
+    later = int(0.2 * SR / HOP)
+    gap = int(0.3 * SR / HOP)
+    ratios = []
+    for k, (f, best, _, _) in enumerate(notes):
+        nxt = notes[k + 1][0] if k + 1 < len(notes) else sal.shape[1]
+        if nxt - f >= gap and f + later < sal.shape[1]:
+            v0 = sal[best, f:f + 3].max()
+            if v0 > 0:
+                ratios.append(sal[best, f + later] / v0)
+    if len(ratios) < 5:
+        ratios = []
+    decay = float(np.median(ratios)) if ratios else 1.0
+    return cells, starts, conf, decay
+
+
+def _label(conf: float) -> str:
+    return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
 
 def _key(y: np.ndarray) -> tuple[int, bool]:
@@ -103,7 +227,7 @@ TYPE = {16: ("whole", 0), 12: ("half", 1), 8: ("half", 0), 6: ("quarter", 1), 4:
 
 
 def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: int = 4,
-               progress=print) -> Draft:
+               instrument: str = "auto", lage: str = "auto", progress=print) -> Draft:
     import librosa
 
     progress("Aufnahme wird geladen …")
@@ -120,15 +244,28 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     while tempo > 150 and len(beats) >= beats_per_bar * 4:
         beats = beats[::2]
         tempo /= 2
-    # 16tel-Raster aus den Schlägen
-    grid = []
+    grid = []  # 16tel-Raster aus den Schlägen
     for a, b in zip(beats[:-1], beats[1:]):
         grid.extend(a + (b - a) * k / 4 for k in range(4))
     grid.append(beats[-1])
     grid = np.array(grid)
 
-    progress("Melodie wird verfolgt …")
-    times, midi, _ = _melody(y_h)
+    progress("Melodie wird gesucht (Bass und Liegetöne werden herausgerechnet) …")
+    times, sal, att = _spectra(y, lage)
+    if instrument == "gehalten":
+        mode = "gehalten"
+        cells, starts, conf = _cells_held(times, sal, grid)
+    else:
+        pc, ps, pconf, decay = _cells_plucked(y, times, sal, att, grid)
+        # automatisch: gezupft, wenn die Melodietöne nach dem Anschlag schnell leiser werden
+        mode = "gezupft" if instrument == "gezupft" or decay < PLUCK_DECAY else "gehalten"
+        if mode == "gezupft":
+            cells, starts, conf = pc, ps, pconf
+        else:
+            cells, starts, conf = _cells_held(times, sal, grid)
+        if instrument == "auto":
+            progress(f"Melodie-Instrument erkannt als „{mode}“ (Abklingen auf {decay:.0%} nach 0,2 s).")
+
     progress("Tonart wird bestimmt …")
     key_pc, major = _key(y_h)
     tonic = key_pc if major else (key_pc + 3) % 12  # Paralleltonart -> Vorzeichen
@@ -136,35 +273,24 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     if fifths > 6:
         fifths -= 12
 
-    # pro 16tel die häufigste (gerundete) Tonhöhe
-    cells: list[int | None] = []
-    for a, b in zip(grid[:-1], grid[1:]):
-        sel = (times >= a) & (times < b)
-        vals = midi[sel]
-        voiced = vals[~np.isnan(vals)]
-        if len(vals) == 0 or len(voiced) < 0.5 * len(vals):
-            cells.append(None)
-            continue
-        r = np.round(voiced).astype(int)
-        cells.append(int(np.bincount(r - MIDI_LO).argmax() + MIDI_LO))
-    # einzelne 16tel-Ausreißer zwischen gleichen Tönen glätten
-    for i in range(1, len(cells) - 1):
-        if cells[i - 1] is not None and cells[i - 1] == cells[i + 1] and cells[i] != cells[i - 1]:
-            cells[i] = cells[i - 1]
-
     per_bar = beats_per_bar * 4
     n_bars = len(cells) // per_bar
-    cells = cells[: n_bars * per_bar]
+    cells, starts = cells[: n_bars * per_bar], starts[: n_bars * per_bar]
     measure_times = [float(grid[k * per_bar]) for k in range(n_bars)]
     end_time = float(grid[n_bars * per_bar]) if n_bars * per_bar < len(grid) else float(grid[-1])
-    progress(f"{n_bars} Takte, Tempo ca. {tempo:.0f}, Tonart {'Dur' if major else 'Moll'} mit {abs(fifths)} {'♯' if fifths > 0 else '♭' if fifths < 0 else 'Vorzeichen'} (klingend)")
+    sign = "♯" if fifths > 0 else "♭" if fifths < 0 else "Vorzeichen"
+    progress(f"{n_bars} Takte, Tempo ca. {tempo:.0f}, Tonart {'Dur' if major else 'Moll'} mit {abs(fifths)} {sign} (klingend)")
+    label = _label(conf)
+    progress(f"Sicherheit der Erkennung: {label} ({conf:.0%})")
 
-    xml, n_notes = _to_musicxml(cells, n_bars, per_bar, beats_per_bar, tempo, fifths, title, composer)
+    xml, n_notes = _to_musicxml(cells, n_bars, per_bar, beats_per_bar, tempo, fifths, title, composer, starts)
     voiced_ratio = sum(c is not None for c in cells) / max(1, len(cells))
-    return Draft(xml, measure_times, end_time, duration, tempo, beats_per_bar, fifths, n_notes, voiced_ratio)
+    return Draft(xml, measure_times, end_time, duration, tempo, beats_per_bar, fifths, n_notes, voiced_ratio,
+                 mode, conf, label)
 
 
-def _to_musicxml(cells, n_bars, per_bar, beats_per_bar, tempo, fifths_concert, title, composer) -> tuple[str, int]:
+def _to_musicxml(cells, n_bars, per_bar, beats_per_bar, tempo, fifths_concert, title, composer,
+                 starts=None) -> tuple[str, int]:
     """Klarinette in B: notiert große Sekunde höher, Tonart +2 Quinten."""
     w_fifths = fifths_concert + 2
     if w_fifths > 6:
@@ -175,10 +301,11 @@ def _to_musicxml(cells, n_bars, per_bar, beats_per_bar, tempo, fifths_concert, t
     n_notes = 0
     for bar in range(n_bars):
         seg = cells[bar * per_bar:(bar + 1) * per_bar]
-        # Läufe gleicher Tonhöhe
+        st = starts[bar * per_bar:(bar + 1) * per_bar] if starts else [False] * len(seg)
+        # Läufe gleicher Tonhöhe (neuer Ton bei neuem Anschlag, auch wenn gleich hoch)
         runs = []
-        for c in seg:
-            if runs and runs[-1][0] == c:
+        for c, new in zip(seg, st):
+            if runs and runs[-1][0] == c and not (new and c is not None):
                 runs[-1][1] += 1
             else:
                 runs.append([c, 1])
