@@ -57,6 +57,7 @@ class Job:
 
 JOBS: dict[str, Job] = {}
 UPLOADED: dict[str, Path] = {}
+BOOT_ID = uuid.uuid4().hex[:8]  # ändert sich bei jedem Start (Seite erkennt den Neustart)
 
 
 def score_info(path: Path) -> dict:
@@ -156,6 +157,23 @@ def run_draft(job: Job, req: dict) -> None:
         _log("Fehler beim Rohentwurf: " + traceback.format_exc())
 
 
+def run_update(job: Job, srv) -> None:
+    from . import update
+
+    try:
+        latest = update.apply(progress=job.log.append)
+        job.result = {"sha": latest["sha"][:7], "date": latest["date"]}
+        job.status = "done"
+        _log(f"aktualisiert auf {latest['sha'][:7]}")
+        time.sleep(1.5)  # Oberfläche holt sich noch den Status
+        update.restart(srv.server_address[1])
+        srv.shutdown()
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e) or e.__class__.__name__
+        job.status = "error"
+        _log("Fehler beim Aktualisieren: " + traceback.format_exc())
+
+
 def run_build(job: Job, req: dict) -> None:
     from .cli import NOTATION
     from .package import build_package
@@ -230,10 +248,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/icon.png":
             return self._send(200, (WEB / "icon.png").read_bytes(), "image/png")
         if path == "/api/ping":
-            return self._json({"app": "playalong-werkstatt", "version": __version__})
+            return self._json({"app": "playalong-werkstatt", "version": __version__, "boot": BOOT_ID})
         if path == "/api/config":
             z = cfg.get("ziel", "")
             return self._json({"ziel": z, "zielOk": bool(z) and Path(z).is_dir(), "version": __version__})
+        if path == "/api/update":
+            from . import update
+
+            return self._json(update.check())
         if path == "/api/pakete":
             return self._json(list_packages(cfg.get("ziel", "")))
         if path.startswith("/api/job/"):
@@ -304,6 +326,13 @@ class Handler(BaseHTTPRequestHandler):
                 target = run_build if path == "/api/build" else run_draft
                 threading.Thread(target=target, args=(job, req), daemon=True).start()
                 return self._json({"job": job.id})
+            if path == "/api/update":
+                if any(j.status == "running" for j in JOBS.values()):
+                    return self._err("Bitte warten, bis der laufende Auftrag fertig ist.")
+                job = Job()
+                JOBS[job.id] = job
+                threading.Thread(target=run_update, args=(job, srv), daemon=True).start()
+                return self._json({"job": job.id})
             if path == "/api/beenden":
                 self._json({"ok": True})
                 threading.Thread(target=srv.shutdown, daemon=True).start()
@@ -321,7 +350,15 @@ def _running_instance(port: int) -> bool:
         return False
 
 
-def main(open_browser: bool = True, port: int = PORT) -> int:
+def _wait_until_free(port: int, seconds: float = 30) -> None:
+    """Beim Neustart: warten, bis die alte Instanz beendet ist."""
+    end = time.time() + seconds
+    while time.time() < end and _running_instance(port):
+        time.sleep(0.3)
+    time.sleep(0.3)
+
+
+def main(open_browser: bool = True, port: int = PORT, restart: bool = False) -> int:
     # Start ohne Konsolenfenster (pythonw): Ausgaben ins Leere bzw. ins Protokoll
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
@@ -330,13 +367,24 @@ def main(open_browser: bool = True, port: int = PORT) -> int:
     from .cli import _load_config, _save_config
 
     url = f"http://127.0.0.1:{port}/"
-    if _running_instance(port):
+    if restart:
+        _wait_until_free(port)
+    elif _running_instance(port):
         # läuft schon: nur den Browser öffnen
         if open_browser:
             webbrowser.open(url)
         return 0
     shutil.rmtree(UPLOADS, ignore_errors=True)  # alte Uploads aufräumen
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = None
+    for _ in range(40):  # Port evtl. noch kurz belegt
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+            break
+        except OSError:
+            time.sleep(0.5)
+    if srv is None:
+        _log(f"Port {port} ist belegt – Werkstatt nicht gestartet")
+        return 1
     srv.cfg = _load_config()  # type: ignore[attr-defined]
     srv.save_cfg = _save_config  # type: ignore[attr-defined]
     _log(f"Werkstatt gestartet: {url}")

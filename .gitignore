@@ -6,6 +6,8 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+# von der Werkstatt-Aktualisierung angelegt
+pipeline/.installierte-version.json
 # Musikdateien gehören nicht ins Repo (nur Code)
 *.mp3
 *.playalong
