@@ -6,6 +6,7 @@
 
 ## Ziel
 Ein Übungs-Player ähnlich Tomplay für meinen Sohn Noel (B-Klarinette). Er spielt die Klarinettenstimme vom Blatt, der Player liefert die Begleitung. Er wird fast täglich genutzt. Der laufende Betrieb darf **keine KI/Credits** brauchen. Claude wird nur für Entwicklung und Wartung eingesetzt.
+  - Gemeint sind **Cloud-KI und kostenpflichtige Dienste**. Lokale, quelloffene Modelle (z. B. Demucs, Basic Pitch), die ohne Internet und ohne Konto auf dem eigenen Rechner laufen, sind erlaubt.
 
 ## Nutzer und Niveau
 - Noel spielt seit ca. 5 Jahren auf sehr hohem Niveau: Weber Concertino op. 26 teilweise vom Blatt, 32tel-Passagen nach ca. 2 Unterrichtsstunden, Bordogni-Etüden vom Blatt.
