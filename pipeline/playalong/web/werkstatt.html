@@ -267,6 +267,7 @@ async function upload(kind, file) {
     if (kind === 'partitur') showInfo(res.info);
     if (kind === 'aufnahme') {
       state.aufnahmeName = res.name;
+      state.tempoFaktor = 1;
       if (!$('e-titel').value) $('e-titel').value = res.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
     }
   } catch (e) {
@@ -304,6 +305,7 @@ function showVerfahren() {
   updateBuild();
 }
 $('e-verfahren').addEventListener('change', showVerfahren);
+for (const id of ['e-taktart', 'e-verfahren', 'e-spur', 'e-instrument', 'e-lage']) $(id).addEventListener('change', () => { state.tempoFaktor = 1; });
 async function loadKi() { try { state.kiInstalled = (await api('/api/ki')).installed; } catch { state.kiInstalled = false; } showVerfahren(); }
 $('ki-setup').onclick = async () => {
   if (state.busy) return;
@@ -349,7 +351,7 @@ $('build').onclick = async () => {
   $('log').textContent = 'Starte …';
   try {
     const { job } = entwurf
-      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value, instrument: $('e-instrument').value, lage: $('e-lage').value, verfahren: $('e-verfahren').value, spur: $('e-spur').value })
+      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value, instrument: $('e-instrument').value, lage: $('e-lage').value, verfahren: $('e-verfahren').value, spur: $('e-spur').value, tempo_faktor: state.tempoFaktor || 1 })
       : await post('/api/build', {
         partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
         stimme: $('stimme').value, notiert: $('notiert').value,
@@ -365,7 +367,7 @@ $('build').onclick = async () => {
       r.className = 'result ok';
       r.innerHTML = `<b class="ok">✓ Fertig</b> in ${st.result.seconds} s: <b>${esc(st.result.file)}</b><br><span class="muted">${esc(st.result.path)}</span>`
         + (st.result.draft ? `<br>Noten zum Nachbearbeiten in MuseScore: <span class="muted">${esc(st.result.draft)}</span>` : '')
-        + (st.result.erkennung ? sicherheit(st.result.erkennung) : '')
+        + (st.result.erkennung ? sicherheit(st.result.erkennung) + tempoKnoepfe(st.result.erkennung) : '')
         + (st.result.report ? `<br><a class="btn small" style="display:inline-flex;align-items:center;margin-top:8px" href="/bericht/${encodeURIComponent(st.result.report)}" target="_blank">Prüfbericht öffnen</a>` : '');
       loadPakete();
     } else {
@@ -378,6 +380,18 @@ $('build').onclick = async () => {
   }
   state.busy = false; updateBuild();
 };
+function tempoKnoepfe(e) {
+  if (!e.tempo) return '';
+  const t = Math.round(e.tempo);
+  return `<div style="margin-top:10px">Erkanntes Tempo: <b>♩ ≈ ${t}</b>. Passen die Takte nicht (im Prüfbericht klickt es an jedem Taktanfang)?<div class="row" style="margin-top:6px">`
+    + `<button class="btn small" type="button" onclick="tempoNeu(2)">Doppelt so schnell neu erstellen (♩ ≈ ${t * 2})</button>`
+    + `<button class="btn small" type="button" onclick="tempoNeu(0.5)">Halb so schnell neu erstellen (♩ ≈ ${Math.round(t / 2)})</button></div></div>`;
+}
+function tempoNeu(f) {
+  if (state.busy) return;
+  state.tempoFaktor = (state.tempoFaktor || 1) * f;
+  $('build').click();
+}
 function sicherheit(e) {
   const ki = String(e.mode || '').startsWith('KI');
   const art = ki ? `lokale KI, ${e.mode.replace('KI, ', '')}` : (e.mode === 'gezupft' ? 'gezupft/angeschlagen' : 'gehalten');
@@ -394,6 +408,7 @@ $('reset').onclick = () => {
   clearFile('aufnahme');
   for (const id of ['titel', 'komponist', 'e-titel', 'e-komponist']) $(id).value = '';
   $('e-taktart').value = '4';
+  state.tempoFaktor = 1;
   $('e-instrument').value = 'auto';
   $('e-verfahren').value = 'schnell';
   $('e-spur').value = 'auto';
