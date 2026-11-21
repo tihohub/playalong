@@ -73,7 +73,8 @@ def cmd_entwurf(a: argparse.Namespace) -> int:
     t = time.time()
     print(f"Rohentwurf aus {a.aufnahme}")
     pkg, xml = build_draft_package(a.aufnahme, ziel, title=a.titel or Path(a.aufnahme).stem,
-                                   composer=a.komponist or "", beats_per_bar=a.taktart, progress=_progress)
+                                   composer=a.komponist or "", beats_per_bar=a.taktart,
+                                   instrument=a.instrument, lage=a.lage, progress=_progress)
     print(f"Fertig in {time.time() - t:.0f} s: {pkg}\nNoten zum Nachbearbeiten in MuseScore: {xml}")
     return 0
 
@@ -180,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--titel")
     e.add_argument("--komponist")
     e.add_argument("--taktart", type=int, choices=[3, 4], default=4, help="Schläge pro Takt (3 oder 4, Standard 4)")
+    e.add_argument("--instrument", choices=["auto", "gezupft", "gehalten"], default="auto",
+                   help="Melodie-Instrument: gezupft (Banjo, Mandoline, Gitarre, Klavier) oder gehalten (Bläser, Streicher, Gesang)")
+    e.add_argument("--lage", choices=["auto", "hoch", "tief"], default="auto", help="wo die Melodie liegt")
     e.add_argument("--ziel")
     e.set_defaults(func=cmd_entwurf)
 

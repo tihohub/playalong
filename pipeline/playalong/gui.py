@@ -142,13 +142,16 @@ def run_draft(job: Job, req: dict) -> None:
         if not Path(ziel).is_dir():
             raise ValueError(f"Zielordner nicht gefunden: {ziel or '(keiner)'}")
         t = time.time()
+        info: dict = {}
+        instrument = req.get("instrument") if req.get("instrument") in ("auto", "gezupft", "gehalten") else "auto"
+        lage = req.get("lage") if req.get("lage") in ("auto", "hoch", "tief") else "auto"
         pkg, xml = build_draft_package(audio, ziel, title=(req.get("titel") or "").strip() or audio.stem,
                                        composer=(req.get("komponist") or "").strip(),
                                        beats_per_bar=3 if str(req.get("taktart")) == "3" else 4,
-                                       progress=job.log.append)
+                                       instrument=instrument, lage=lage, progress=job.log.append, info=info)
         rep = Path(ziel) / "Prüfberichte" / f"{pkg.stem}.html"
         job.result = {"file": pkg.name, "path": str(pkg), "report": rep.name if rep.exists() else "",
-                      "draft": str(xml), "seconds": round(time.time() - t)}
+                      "draft": str(xml), "seconds": round(time.time() - t), "erkennung": info}
         job.status = "done"
         _log(f"Rohentwurf: {pkg}")
     except Exception as e:  # noqa: BLE001

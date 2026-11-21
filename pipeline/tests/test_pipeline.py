@@ -108,6 +108,54 @@ class DraftTest(unittest.TestCase):
             tot += 1
             ok += c == truth
         self.assertGreater(ok / tot, 0.7, f"{ok}/{tot}")
+        self.assertEqual(draft.mode, "gehalten")
+
+    def test_rohentwurf_bass_und_gezupfte_melodie(self):
+        """Wie ein Klingelton: lauter Bass-Liegeton + Akkord, darüber leise, gezupfte Melodie."""
+        import soundfile as sf
+
+        import playalong.transcribe as tr
+
+        tl = build_timeline(load_musicxml(ROOT / "player" / "public" / "demo" / "etuede.musicxml"))
+        sr, lead = 22050, 0.5
+        y = np.zeros(int((lead + tl.duration + 1) * sr))
+        t_all = np.arange(len(y)) / sr
+        y += np.sin(2 * np.pi * 98 * t_all) + 0.5 * np.sin(2 * np.pi * 196 * t_all)  # Bass G2
+        for f in (196, 246.94, 293.66):
+            y += 0.25 * np.sin(2 * np.pi * f * t_all)  # Akkord G-Dur
+        for n in tl.notes:  # Melodie eine Oktave höher, gezupft
+            a = int((lead + tl.seconds(n.start)) * sr)
+            m = min(len(y) - a, int(0.6 * sr))
+            t = np.arange(m) / sr
+            f = 440 * 2 ** ((n.midi + 12 - 69) / 12)
+            y[a:a + m] += 0.35 * np.exp(-t * 7) * np.minimum(1, t * 800) * (np.sin(2 * np.pi * f * t) + 0.5 * np.sin(4 * np.pi * f * t))
+        captured = {}
+        orig = tr._to_musicxml
+
+        def spy(cells, *a, **k):
+            captured["cells"] = cells
+            return orig(cells, *a, **k)
+
+        with tempfile.TemporaryDirectory() as d:
+            wav = Path(d) / "klingelton.wav"
+            sf.write(wav, y / np.abs(y).max() * 0.8, sr)
+            tr._to_musicxml = spy
+            try:
+                draft = tr.transcribe(str(wav), "Test", progress=lambda *_: None)
+            finally:
+                tr._to_musicxml = orig
+        self.assertEqual(draft.mode, "gezupft")
+        mt = draft.measure_times + [draft.end_time]
+        grid = [a + (b - a) * k / 16 for a, b in zip(mt[:-1], mt[1:]) for k in range(16)]
+        ok = tot = 0
+        for c, g in zip(captured["cells"], grid):
+            s = g + 0.03 - lead
+            truth = next((n.midi + 12 for n in tl.notes if tl.seconds(n.start) <= s < min(tl.seconds(n.start + n.dur), tl.seconds(n.start) + 0.6)), None)
+            if truth is None:
+                continue
+            tot += 1
+            ok += c is not None and (c - truth) % 12 == 0  # Tonhöhe richtig, Oktave egal
+        self.assertGreater(ok / tot, 0.7, f"{ok}/{tot}")  # alte Erkennung: ca. 10 %
 
 
 if __name__ == "__main__":

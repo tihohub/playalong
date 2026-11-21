@@ -114,7 +114,8 @@ def build_package(score_path: str | Path, audio_path: str | Path | None, out_dir
 
 
 def build_draft_package(audio_path: str | Path, out_dir: str | Path, *, title: str, composer: str = "",
-                        beats_per_bar: int = 4, progress=print) -> tuple[Path, Path]:
+                        beats_per_bar: int = 4, instrument: str = "auto", lage: str = "auto",
+                        progress=print, info: dict | None = None) -> tuple[Path, Path]:
     """Rohentwurf: Melodie aus der Aufnahme erkennen, als Klarinettenstimme speichern und
     zusammen mit der Aufnahme als Liedpaket ablegen. Gibt (Paket, MusicXML-Entwurf) zurück."""
     import numpy as np
@@ -127,7 +128,10 @@ def build_draft_package(audio_path: str | Path, out_dir: str | Path, *, title: s
         raise FileNotFoundError(f"Zielordner nicht gefunden: {out_dir}")
     title = title.strip() or Path(audio_path).stem
     full_title = f"{title} (Rohentwurf)"
-    d = transcribe(str(audio_path), full_title, composer, beats_per_bar=beats_per_bar, progress=progress)
+    d = transcribe(str(audio_path), full_title, composer, beats_per_bar=beats_per_bar,
+                   instrument=instrument, lage=lage, progress=progress)
+    if info is not None:
+        info.update(mode=d.mode, confidence=round(d.confidence, 2), label=d.confidence_label)
     draft_dir = out_dir / "Rohentwürfe"
     draft_dir.mkdir(exist_ok=True)
     xml_path = draft_dir / f"{safe_name(full_title)}.musicxml"
