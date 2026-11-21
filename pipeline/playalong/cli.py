@@ -74,8 +74,17 @@ def cmd_entwurf(a: argparse.Namespace) -> int:
     print(f"Rohentwurf aus {a.aufnahme}")
     pkg, xml = build_draft_package(a.aufnahme, ziel, title=a.titel or Path(a.aufnahme).stem,
                                    composer=a.komponist or "", beats_per_bar=a.taktart,
-                                   instrument=a.instrument, lage=a.lage, progress=_progress)
+                                   instrument=a.instrument, lage=a.lage, verfahren=a.verfahren, spur=a.spur,
+                                   progress=_progress)
     print(f"Fertig in {time.time() - t:.0f} s: {pkg}\nNoten zum Nachbearbeiten in MuseScore: {xml}")
+    return 0
+
+
+def cmd_ki_einrichten(a: argparse.Namespace) -> int:
+    from . import ki
+
+    st = ki.setup(progress=_progress)
+    print(f"Fertig: {st['dir']}")
     return 0
 
 
@@ -184,8 +193,15 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--instrument", choices=["auto", "gezupft", "gehalten"], default="auto",
                    help="Melodie-Instrument: gezupft (Banjo, Mandoline, Gitarre, Klavier) oder gehalten (Bläser, Streicher, Gesang)")
     e.add_argument("--lage", choices=["auto", "hoch", "tief"], default="auto", help="wo die Melodie liegt")
+    e.add_argument("--verfahren", choices=["schnell", "ki"], default="schnell",
+                   help="schnell (ohne KI) oder ki (lokale KI: Demucs + Basic Pitch, vorher „playalong ki-einrichten“)")
+    e.add_argument("--spur", choices=["auto", "vocals", "guitar", "piano", "other"], default="auto",
+                   help="nur bei --verfahren ki: Spur mit der Melodie (Gesang, Gitarre, Klavier, Rest)")
     e.add_argument("--ziel")
     e.set_defaults(func=cmd_entwurf)
+
+    k = sub.add_parser("ki-einrichten", help="lokale KI für den Rohentwurf einrichten (einmalig, ca. 1,6 GB)")
+    k.set_defaults(func=cmd_ki_einrichten)
 
     i = sub.add_parser("info", help="Partitur anzeigen: Titel, Takte, Dauer, Stimmen")
     i.add_argument("partitur")

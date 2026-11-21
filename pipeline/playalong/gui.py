@@ -145,10 +145,13 @@ def run_draft(job: Job, req: dict) -> None:
         info: dict = {}
         instrument = req.get("instrument") if req.get("instrument") in ("auto", "gezupft", "gehalten") else "auto"
         lage = req.get("lage") if req.get("lage") in ("auto", "hoch", "tief") else "auto"
+        verfahren = "ki" if req.get("verfahren") == "ki" else "schnell"
+        spur = req.get("spur") if req.get("spur") in ("auto", "vocals", "guitar", "piano", "other") else "auto"
         pkg, xml = build_draft_package(audio, ziel, title=(req.get("titel") or "").strip() or audio.stem,
                                        composer=(req.get("komponist") or "").strip(),
                                        beats_per_bar=3 if str(req.get("taktart")) == "3" else 4,
-                                       instrument=instrument, lage=lage, progress=job.log.append, info=info)
+                                       instrument=instrument, lage=lage, verfahren=verfahren, spur=spur,
+                                       progress=job.log.append, info=info)
         rep = Path(ziel) / "Prüfberichte" / f"{pkg.stem}.html"
         job.result = {"file": pkg.name, "path": str(pkg), "report": rep.name if rep.exists() else "",
                       "draft": str(xml), "seconds": round(time.time() - t), "erkennung": info}
@@ -175,6 +178,19 @@ def run_update(job: Job, srv) -> None:
         job.error = str(e) or e.__class__.__name__
         job.status = "error"
         _log("Fehler beim Aktualisieren: " + traceback.format_exc())
+
+
+def run_ki_setup(job: Job) -> None:
+    from . import ki
+
+    try:
+        job.result = ki.setup(progress=job.log.append)
+        job.status = "done"
+        _log("KI-Erweiterung eingerichtet")
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e) or e.__class__.__name__
+        job.status = "error"
+        _log("Fehler bei der KI-Einrichtung: " + traceback.format_exc())
 
 
 def run_build(job: Job, req: dict) -> None:
@@ -259,6 +275,10 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._json(update.check())
+        if path == "/api/ki":
+            from . import ki
+
+            return self._json(ki.status())
         if path == "/api/pakete":
             return self._json(list_packages(cfg.get("ziel", "")))
         if path.startswith("/api/job/"):
@@ -335,6 +355,13 @@ class Handler(BaseHTTPRequestHandler):
                 job = Job()
                 JOBS[job.id] = job
                 threading.Thread(target=run_update, args=(job, srv), daemon=True).start()
+                return self._json({"job": job.id})
+            if path == "/api/ki/einrichten":
+                if any(j.status == "running" for j in JOBS.values()):
+                    return self._err("Bitte warten, bis der laufende Auftrag fertig ist.")
+                job = Job()
+                JOBS[job.id] = job
+                threading.Thread(target=run_ki_setup, args=(job,), daemon=True).start()
                 return self._json({"job": job.id})
             if path == "/api/beenden":
                 self._json({"ok": True})

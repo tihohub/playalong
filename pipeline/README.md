@@ -68,9 +68,15 @@ Dann „**Rohentwurf erstellen**“ klicken. Ergebnis:
 - `<Titel> (Rohentwurf).playalong`: sofort im Player nutzbar (Original-Modus mit der Aufnahme)
 - `Rohentwürfe\<Titel> (Rohentwurf).musicxml`: zum **Nachbearbeiten in MuseScore**; danach als normale Partitur wieder durch die Werkstatt schicken
 
+**Verfahren:**
+
+- **schnell (ohne KI):** in Sekunden fertig. Gut, wenn die Melodie klar vorne liegt (Soloinstrument mit Klavier o. Ä.).
+- **genauer mit lokaler KI:** trennt die Aufnahme zuerst mit **Demucs** in Spuren (Gesang, Gitarre, Klavier, Bass, Schlagzeug, Rest) und erkennt dann mit **Basic Pitch** die Noten der Melodiespur. Hilft vor allem bei lautem Bass, Bands und Synthesizer-Musik. Die Melodiespur wird automatisch gewählt oder unter „Melodie in Spur“ festgelegt. Dauert einige Minuten pro Lied.
+  - **Einmalige Einrichtung:** Beim ersten Mal erscheint der Knopf **„KI-Erweiterung einrichten“**. Die Werkstatt lädt dann ein eigenes Python, PyTorch (CPU), Demucs, Basic Pitch und die Modelle herunter (ca. 1,6 GB, Ordner `C:\Users\<Name>\.playalong\ki`). Danach läuft alles ohne Internet, ohne Konto und ohne Kosten. Löschen: diesen Ordner entfernen.
+
 Die Werkstatt zeigt an, wie **sicher** die Erkennung war (gut / mittel / unsicher). Bei „unsicher“ lohnt es sich, die beiden Hilfen anders einzustellen.
 
-Das ist ausdrücklich nur eine **Starthilfe**. Laute Bässe und Liegetöne werden herausgerechnet, und die Melodielinie wird geglättet: Oktavfehler und einzelne Ausreißer, die zu keinem Nachbarton passen, werden korrigiert, echte große Sprünge bleiben erhalten. Trotzdem müssen Rhythmus, Tonart und einzelne Töne fast immer korrigiert werden. Gemessen an synthetischen Aufnahmen (Anteil richtiger Töne pro 16tel): Solo-Etüde 82 %, Klarinette mit Klavier 85 %, gezupfte Melodie über lautem Bass 61 % (82 % wenn man Oktavfehler mitzählt). Echte Aufnahmen, vor allem Orchester und Synthesizer, sind deutlich schwieriger. Kommandozeile: `playalong entwurf aufnahme.mp3 --titel "…" --taktart 4 --instrument gezupft --lage auto`.
+Das ist ausdrücklich nur eine **Starthilfe**. Laute Bässe und Liegetöne werden herausgerechnet, und die Melodielinie wird geglättet: Oktavfehler und einzelne Ausreißer, die zu keinem Nachbarton passen, werden korrigiert, echte große Sprünge bleiben erhalten. Trotzdem müssen Rhythmus, Tonart und einzelne Töne fast immer korrigiert werden. Gemessen an synthetischen Aufnahmen (Anteil richtiger Töne pro 16tel): Solo-Etüde 82 %, Klarinette mit Klavier 85 %, gezupfte Melodie über lautem Bass 61 % (82 % wenn man Oktavfehler mitzählt). Echte Aufnahmen, vor allem Orchester und Synthesizer, sind deutlich schwieriger. Kommandozeile: `playalong entwurf aufnahme.mp3 --titel "…" --taktart 4 --instrument gezupft --lage auto`, mit KI: `playalong ki-einrichten` (einmalig), dann `playalong entwurf aufnahme.mp3 --verfahren ki --spur auto`.
 
 ## 3. Ein Lied verarbeiten mit der Kommandozeile (Alternative)
 
@@ -164,4 +170,5 @@ playalong sync partitur.mxl aufnahme.mp3 --bericht bericht.html   # nur abgleich
 - `playalong/package.py`, `playalong/report.py`, `playalong/cli.py`: Paket, Prüfbericht, Kommandozeile
 - `playalong/gui.py` + `playalong/web/werkstatt.html`: Werkstatt (lokaler Webserver nur auf 127.0.0.1, Standardbibliothek)
 - `playalong/update.py`: Selbst-Aktualisierung aus GitHub (Commit-Stand von `pipeline/` auf `main`, Datei `.installierte-version.json`)
+- `playalong/ki.py` + `playalong/ki_worker.py`: lokale KI (Einrichtung über uv mit eigenem Python 3.12 unter `~/.playalong/ki`, Aufruf von Demucs + Basic Pitch in einem eigenen Prozess)
 - `playalong/transcribe.py`: Rohentwurf (Beat-Tracking, Liegetöne dämpfen, harmonische Summierung mit Lage-Vorliebe, Modus „gezupft“ über Anschläge bzw. „gehalten“ pro 16tel, Glättung der Linie per Viterbi über die Oktavwahl, Tonart nach Krumhansl, Sicherheitswert)

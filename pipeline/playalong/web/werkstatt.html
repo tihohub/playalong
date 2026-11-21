@@ -124,8 +124,21 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
       <label for="e-komponist">Komponist</label><input type="text" id="e-komponist">
       <label for="e-taktart">Taktart</label>
       <select id="e-taktart"><option value="4">4 Schläge pro Takt (4/4, 2/2)</option><option value="3">3 Schläge pro Takt (3/4)</option></select>
-      <label for="e-instrument">Melodie-Instrument</label>
-      <select id="e-instrument">
+      <label for="e-verfahren">Verfahren</label>
+      <select id="e-verfahren">
+        <option value="schnell">schnell (ohne KI, Sekunden)</option>
+        <option value="ki">genauer mit lokaler KI (Demucs + Basic Pitch, einige Minuten)</option>
+      </select>
+      <label for="e-spur" class="ki-only">Melodie in Spur</label>
+      <select id="e-spur" class="ki-only">
+        <option value="auto">automatisch wählen</option>
+        <option value="vocals">Gesang</option>
+        <option value="guitar">Gitarre (auch Banjo, Mandoline)</option>
+        <option value="piano">Klavier</option>
+        <option value="other">Rest (übrige Instrumente)</option>
+      </select>
+      <label for="e-instrument" class="fast-only">Melodie-Instrument</label>
+      <select id="e-instrument" class="fast-only">
         <option value="auto">automatisch erkennen</option>
         <option value="gezupft">gezupft / angeschlagen (Banjo, Mandoline, Gitarre, Klavier)</option>
         <option value="gehalten">gehalten (Bläser, Streicher, Gesang)</option>
@@ -136,6 +149,11 @@ th { color:var(--muted); font-weight:500; font-size:.85rem; }
         <option value="hoch">eher hoch</option>
         <option value="tief">eher tief</option>
       </select>
+    </div>
+    <div id="ki-box" class="note hidden" style="margin-top:12px">
+      <span id="ki-text"></span>
+      <div class="row" style="margin-top:8px"><button class="btn" id="ki-setup">KI-Erweiterung einrichten</button></div>
+      <div id="ki-log" class="hidden" style="font-family:ui-monospace,Consolas,monospace;font-size:.85rem;white-space:pre-wrap;margin-top:8px"></div>
     </div>
   </section>
 
@@ -212,6 +230,7 @@ function showArt() {
   $('aufnahme-hinweis').classList.toggle('hidden', entwurf || !state.aufnahme);
   if (!state.aufnahme) $('drop-aufnahme').innerHTML = entwurf ? EMPTY.aufnahmeEntwurf : EMPTY.aufnahme;
   $('build').textContent = entwurf ? 'Rohentwurf erstellen' : 'Liedpaket bauen';
+  if (typeof showVerfahren === 'function' && state.kiInstalled !== undefined) showVerfahren();
   updateBuild();
 }
 
@@ -274,13 +293,51 @@ setupDrop('partitur');
 setupDrop('aufnahme');
 
 // ---------- Bauen
+function kiSelected() { return state.art === 'entwurf' && $('e-verfahren').value === 'ki'; }
+function showVerfahren() {
+  const isKi = $('e-verfahren').value === 'ki';
+  for (const el of document.querySelectorAll('.ki-only')) el.classList.toggle('hidden', !isKi);
+  for (const el of document.querySelectorAll('.fast-only')) el.classList.toggle('hidden', isKi);
+  const box = $('ki-box');
+  box.classList.toggle('hidden', !(isKi && state.art === 'entwurf' && state.aufnahme && !state.kiInstalled));
+  $('ki-text').innerHTML = '<b>Die lokale KI ist noch nicht eingerichtet.</b> Einmalig werden ca. 1,6 GB heruntergeladen (eigenes Python, PyTorch, Demucs, Basic Pitch) – je nach Internet einige Minuten. Danach läuft alles ohne Internet auf diesem Rechner.';
+  updateBuild();
+}
+$('e-verfahren').addEventListener('change', showVerfahren);
+async function loadKi() { try { state.kiInstalled = (await api('/api/ki')).installed; } catch { state.kiInstalled = false; } showVerfahren(); }
+$('ki-setup').onclick = async () => {
+  if (state.busy) return;
+  state.busy = true; updateBuild();
+  $('ki-setup').disabled = true;
+  $('ki-log').classList.remove('hidden');
+  $('ki-log').textContent = 'Starte …';
+  try {
+    const { job } = await post('/api/ki/einrichten');
+    let st;
+    do {
+      await new Promise((r) => setTimeout(r, 800));
+      st = await api('/api/job/' + job);
+      $('ki-log').textContent = st.log.join('\n') || 'Arbeite …';
+    } while (st.status === 'running');
+    if (st.status === 'error') throw new Error(st.error);
+    state.kiInstalled = true;
+  } catch (e) {
+    $('ki-log').textContent += `\n\nFehler: ${e.message}`;
+  }
+  $('ki-setup').disabled = false;
+  state.busy = false;
+  showVerfahren();
+};
+
 function updateBuild() {
   const entwurf = state.art === 'entwurf';
-  const ready = state.zielOk && !state.busy && (entwurf ? state.aufnahme : state.partitur);
+  const ready = state.zielOk && !state.busy && (entwurf ? state.aufnahme : state.partitur) && !(kiSelected() && !state.kiInstalled);
   $('build').disabled = !ready;
   $('reset').disabled = state.busy;
   $('build-hint').textContent = state.busy ? '' : !state.zielOk ? 'Zuerst einen Zielordner festlegen.'
-    : entwurf ? (state.aufnahme ? 'Melodie wird aus der Aufnahme erkannt (dauert ca. 10–30 s).' : 'Zuerst eine Aufnahme auswählen.')
+    : entwurf ? (!state.aufnahme ? 'Zuerst eine Aufnahme auswählen.'
+      : kiSelected() ? (state.kiInstalled ? 'Spurtrennung und Notenerkennung mit lokaler KI (einige Minuten).' : 'Zuerst die KI-Erweiterung einrichten.')
+      : 'Melodie wird aus der Aufnahme erkannt (dauert ca. 10–30 s).')
     : !state.partitur ? 'Zuerst eine Partitur auswählen.'
     : state.aufnahme ? 'Partitur + Aufnahme: mit Abgleich und Prüfbericht.' : 'Nur Partitur: Begleitung kommt aus den Noten.';
 }
@@ -292,7 +349,7 @@ $('build').onclick = async () => {
   $('log').textContent = 'Starte …';
   try {
     const { job } = entwurf
-      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value, instrument: $('e-instrument').value, lage: $('e-lage').value })
+      ? await post('/api/entwurf', { aufnahme: state.aufnahme, titel: $('e-titel').value, komponist: $('e-komponist').value, taktart: $('e-taktart').value, instrument: $('e-instrument').value, lage: $('e-lage').value, verfahren: $('e-verfahren').value, spur: $('e-spur').value })
       : await post('/api/build', {
         partitur: state.partitur, aufnahme: state.aufnahme, titel: $('titel').value, komponist: $('komponist').value,
         stimme: $('stimme').value, notiert: $('notiert').value,
@@ -322,12 +379,15 @@ $('build').onclick = async () => {
   state.busy = false; updateBuild();
 };
 function sicherheit(e) {
-  const art = e.mode === 'gezupft' ? 'gezupft/angeschlagen' : 'gehalten';
+  const ki = String(e.mode || '').startsWith('KI');
+  const art = ki ? `lokale KI, ${e.mode.replace('KI, ', '')}` : (e.mode === 'gezupft' ? 'gezupft/angeschlagen' : 'gehalten');
+  const tipp = ki ? 'Tipp: eine andere „Melodie in Spur“ wählen oder das schnelle Verfahren vergleichen.'
+    : 'Tipp: „Melodie-Instrument“ und „Melodie liegt“ anders einstellen, oder das Verfahren „lokale KI“ versuchen.';
   if (e.label === 'unsicher') {
-    return `<div class="note" style="margin-top:10px"><b>⚠ Erkennung unsicher.</b> Die Melodie war in der Aufnahme kaum von der Begleitung zu trennen (erkannt als ${art}). Der Entwurf enthält vermutlich viele falsche Töne. Tipp: „Melodie-Instrument“ und „Melodie liegt“ anders einstellen und erneut versuchen.</div>`;
+    return `<div class="note" style="margin-top:10px"><b>⚠ Erkennung unsicher</b> (${esc(art)}). Die Melodie war kaum eindeutig zu erkennen, der Entwurf enthält vermutlich viele falsche Töne. ${tipp}</div>`;
   }
   const color = e.label === 'gut' ? 'ok' : 'warn';
-  return `<br>Sicherheit der Erkennung: <b class="${color}">${e.label}</b> <span class="muted">(Melodie erkannt als ${art})</span>`;
+  return `<br>Sicherheit der Erkennung: <b class="${color}">${e.label}</b> <span class="muted">(${esc(art)})</span>`;
 }
 $('reset').onclick = () => {
   clearFile('partitur');
@@ -335,6 +395,8 @@ $('reset').onclick = () => {
   for (const id of ['titel', 'komponist', 'e-titel', 'e-komponist']) $(id).value = '';
   $('e-taktart').value = '4';
   $('e-instrument').value = 'auto';
+  $('e-verfahren').value = 'schnell';
+  $('e-spur').value = 'auto';
   $('e-lage').value = 'auto';
   $('log').classList.add('hidden');
   $('result').className = 'result hidden';
@@ -410,6 +472,7 @@ $('update-btn').onclick = async () => {
 
 // ---------- Start
 showArt();
+loadKi();
 checkUpdate();
 api('/api/config').then((cfg) => { $('version').textContent = 'Version ' + cfg.version; showZiel(cfg); });
 </script>
