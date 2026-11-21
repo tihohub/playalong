@@ -370,6 +370,28 @@ def _label(conf: float) -> str:
     return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
 
+def _align_downbeat(y: np.ndarray, beats: np.ndarray, beats_per_bar: int) -> np.ndarray:
+    """Taktanfang an der Betonung ausrichten: von den möglichen Lagen (Schlag 1, 2, … als
+    Taktbeginn) die mit den stärksten Einsätzen auf Schlag 1 wählen. Vor dem ersten Takt
+    fehlende Schläge werden im Schlagabstand ergänzt (Auftakt), soweit die Aufnahme reicht."""
+    import librosa
+
+    if len(beats) < beats_per_bar * 4:
+        return beats
+    oenv = librosa.onset.onset_strength(y=y, sr=SR, hop_length=HOP)
+    frames = np.clip(librosa.time_to_frames(beats, sr=SR, hop_length=HOP), 0, len(oenv) - 1)
+    strength = oenv[frames]
+    phase = int(np.argmax([strength[p::beats_per_bar].mean() for p in range(beats_per_bar)]))
+    if phase == 0:
+        return beats
+    step = float(np.median(np.diff(beats[: beats_per_bar * 4])))
+    missing = beats_per_bar - phase  # so viele Schläge vor dem ersten erkannten ergänzen
+    extra = beats[0] - step * np.arange(missing, 0, -1)
+    if extra[0] >= 0:
+        return np.concatenate([extra, beats])
+    return beats[phase:]  # Aufnahme beginnt zu früh: angefangenen ersten Takt weglassen
+
+
 def _key(y: np.ndarray) -> tuple[int, bool]:
     """Tonart (Grundton-Tonklasse, Dur?) nach Krumhansl-Schmuckler."""
     import librosa
@@ -418,6 +440,7 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     while tempo > 150 and len(beats) >= beats_per_bar * 4:
         beats = beats[::2]
         tempo /= 2
+    beats = _align_downbeat(y, beats, beats_per_bar)
     grid = []  # 16tel-Raster aus den Schlägen
     for a, b in zip(beats[:-1], beats[1:]):
         grid.extend(a + (b - a) * k / 4 for k in range(4))
