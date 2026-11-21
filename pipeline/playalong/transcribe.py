@@ -306,6 +306,66 @@ def _smooth_line(cells, starts, times, sal, grid):
     return new_cells, new_starts
 
 
+# --------------------------------------------------------------------------- Verfahren „lokale KI“
+
+KI_MIN_DUR = 0.06  # kürzere erkannte Töne verwerfen (s)
+
+
+def _cells_from_events(events, grid) -> tuple[list, list, float]:
+    """Noten von Basic Pitch [Beginn, Ende, MIDI, Stärke] -> einstimmige Linie im 16tel-Raster.
+    Je Anschlag (±40 ms) zählt der höchste deutlich hörbare Ton; Töne außerhalb des
+    Klarinettenumfangs werden in die nächste passende Oktave geholt."""
+    ev = sorted((e for e in events if e[1] - e[0] >= KI_MIN_DUR), key=lambda e: e[0])
+    groups: list[list] = []
+    for e in ev:
+        if groups and e[0] - groups[-1][0][0] <= 0.04:
+            groups[-1].append(e)
+        else:
+            groups.append([e])
+    notes = []
+    for g in groups:
+        loud = max(x[3] for x in g)
+        cand = [x for x in g if x[3] >= 0.5 * loud]
+        s, e, p, a = max(cand, key=lambda x: x[2])
+        while p < MIDI_LO:
+            p += 12
+        while p > MIDI_HI:
+            p -= 12
+        notes.append([s, e, p, a])
+    for k in range(len(notes) - 1):  # einstimmig: Ton endet spätestens beim nächsten Anschlag
+        notes[k][1] = min(notes[k][1], notes[k + 1][0])
+    n_cells = len(grid) - 1
+    cells: list[int | None] = [None] * n_cells
+    starts = [False] * n_cells
+    g0 = grid[:-1]
+    for s, e, p, _ in notes:
+        a = int(np.argmin(np.abs(g0 - s)))
+        b = max(a + 1, int(np.argmin(np.abs(g0 - e))))
+        for i in range(a, min(b, n_cells)):
+            cells[i] = int(p)
+            starts[i] = i == a
+    amps = [n[3] for n in notes]
+    conf = float(np.clip((np.mean(amps) - 0.2) / 0.5, 0, 1)) if amps else 0.0
+    return cells, starts, conf
+
+
+def _line_clarity(cells, starts, times, sal, grid) -> float:
+    """Sicherheit wie beim schnellen Verfahren: wie deutlich der gewählte Ton am Anschlag
+    vor anderen Tönen liegt (gemessen auf der Melodiespur)."""
+    fidx = np.searchsorted(times, grid)
+    vals = []
+    for i, (c, st) in enumerate(zip(cells, starts)):
+        if c is None or not st:
+            continue
+        f = min(fidx[i] + 2, sal.shape[1] - 1)
+        k = (c - MIDI_LO) * BINS_PER_SEMI
+        if 0 <= k < sal.shape[0]:
+            col = sal[:, f]
+            best = int(k + np.argmax(col[max(0, k - 1):k + 2]) - (1 if k > 0 else 0))
+            vals.append(_clarity(col, best))
+    return float(np.mean(vals)) if vals else 0.0
+
+
 def _label(conf: float) -> str:
     return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
@@ -340,7 +400,8 @@ TYPE = {16: ("whole", 0), 12: ("half", 1), 8: ("half", 0), 6: ("quarter", 1), 4:
 
 
 def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: int = 4,
-               instrument: str = "auto", lage: str = "auto", smooth: bool = True, progress=print) -> Draft:
+               instrument: str = "auto", lage: str = "auto", smooth: bool = True, verfahren: str = "schnell",
+               spur: str = "auto", progress=print) -> Draft:
     import librosa
 
     progress("Aufnahme wird geladen …")
@@ -363,9 +424,24 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     grid.append(beats[-1])
     grid = np.array(grid)
 
-    progress("Melodie wird gesucht (Bass und Liegetöne werden herausgerechnet) …")
-    times, sal, att = _spectra(y, lage)
-    if instrument == "gehalten":
+    if verfahren == "ki":
+        from . import ki
+
+        res, work = ki.separate_and_transcribe(audio_path, progress=progress)
+        with work:
+            stem = ki.choose_stem(res, spur)
+            progress(f"Melodie aus der Spur „{ki.STEM_NAMES.get(stem, stem)}“ (Anteil {res['stems'][stem]['energy']:.0%}).")
+            y_stem, _ = librosa.load(res["stems"][stem]["file"], sr=SR, mono=True)
+        times, sal, _ = _spectra(y_stem, lage)  # für die Glättung: wie stark ist welcher Ton hörbar
+        cells, starts, _ = _cells_from_events(res["stems"][stem]["events"], grid)
+        conf = _line_clarity(cells, starts, times, sal, grid)
+        mode = f"KI, Spur {ki.STEM_NAMES.get(stem, stem)}"
+    else:
+        progress("Melodie wird gesucht (Bass und Liegetöne werden herausgerechnet) …")
+        times, sal, att = _spectra(y, lage)
+    if verfahren == "ki":
+        pass
+    elif instrument == "gehalten":
         mode = "gehalten"
         cells, starts, conf = _cells_held(times, sal, grid)
     else:

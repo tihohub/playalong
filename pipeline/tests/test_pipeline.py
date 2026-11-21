@@ -158,5 +158,43 @@ class DraftTest(unittest.TestCase):
         self.assertGreater(ok / tot, 0.7, f"{ok}/{tot}")  # alte Erkennung: ca. 10 %
 
 
+class KiTest(unittest.TestCase):
+    """Teile des KI-Verfahrens, die ohne installierte KI prüfbar sind."""
+
+    def test_noten_zu_melodielinie(self):
+        from playalong.transcribe import MIDI_HI, MIDI_LO, _cells_from_events
+
+        grid = np.arange(0, 4.01, 0.25)  # 16 Sechzehntel à 0,25 s
+        events = [
+            [0.0, 0.5, 72, 0.8], [0.01, 0.5, 60, 0.9],  # gleichzeitig: höherer Ton zählt
+            [0.5, 1.0, 110, 0.7],  # zu hoch -> in den Klarinettenumfang geholt
+            [1.0, 1.02, 70, 0.9],  # zu kurz -> verworfen
+            [1.5, 3.0, 74, 0.6], [2.0, 2.5, 76, 0.6],  # einstimmig: 74 endet bei 76
+        ]
+        cells, starts, _ = _cells_from_events(events, grid)
+        self.assertEqual(cells[0:2], [72, 72])
+        self.assertTrue(MIDI_LO <= cells[2] <= MIDI_HI and cells[2] % 12 == 110 % 12)
+        self.assertIsNone(cells[4])
+        self.assertEqual(cells[6:8], [74, 74])
+        self.assertEqual(cells[8], 76)
+        self.assertEqual([i for i, s in enumerate(starts) if s], [0, 2, 6, 8])
+
+    def test_spurwahl(self):
+        from playalong.ki import choose_stem
+
+        def ev(pitches):
+            return [[k * 0.2, k * 0.2 + 0.15, p, 0.6] for k, p in enumerate(pitches)]
+
+        res = {"stems": {
+            "guitar": {"energy": 0.48, "events": ev([55, 59, 62, 67] * 5)},  # Begleitmuster, tiefer
+            "other": {"energy": 0.24, "events": ev([71, 69, 67, 69, 79, 81] * 4)},  # Melodie, höher
+            "vocals": {"energy": 0.0, "events": []},
+        }}
+        self.assertEqual(choose_stem(res), "other")
+        self.assertEqual(choose_stem(res, "guitar"), "guitar")
+        res["stems"]["vocals"] = {"energy": 0.3, "events": ev([60, 62, 64] * 4)}
+        self.assertEqual(choose_stem(res), "vocals")  # Gesang hat Vorrang
+
+
 if __name__ == "__main__":
     unittest.main()

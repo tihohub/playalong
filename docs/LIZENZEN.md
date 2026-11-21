@@ -16,3 +16,12 @@
 ## Demo-Stücke
 
 `player/public/demo/*.musicxml` wurden für dieses Projekt geschrieben (`pipeline/testdata/make_demo_scores.py`) und sind gemeinfrei (CC0).
+
+## Lokale KI für den Rohentwurf (optional, nicht im Repo)
+
+Wird erst bei „KI-Erweiterung einrichten“ heruntergeladen und nur lokal genutzt:
+
+- [Demucs](https://github.com/facebookresearch/demucs) (Spurtrennung, Modell `htdemucs_6s`): MIT
+- [Basic Pitch](https://github.com/spotify/basic-pitch) (Notenerkennung): Apache-2.0
+- [PyTorch](https://pytorch.org/): BSD-3-Clause; [ONNX Runtime](https://onnxruntime.ai/): MIT
+- [uv](https://github.com/astral-sh/uv) (lädt Python und Pakete): MIT / Apache-2.0
