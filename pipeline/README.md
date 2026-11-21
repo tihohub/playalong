@@ -70,7 +70,7 @@ Dann „**Rohentwurf erstellen**“ klicken. Ergebnis:
 
 Die Werkstatt zeigt an, wie **sicher** die Erkennung war (gut / mittel / unsicher). Bei „unsicher“ lohnt es sich, die beiden Hilfen anders einzustellen.
 
-Das ist ausdrücklich nur eine **Starthilfe**. Laute Bässe und Liegetöne werden herausgerechnet, trotzdem müssen Rhythmus, Tonart und einzelne Töne fast immer korrigiert werden. Gemessen an synthetischen Aufnahmen (Anteil richtiger Töne pro 16tel): Solo-Etüde 82 %, Klarinette mit Klavier 85 %, gezupfte Melodie über lautem Bass 61 % (82 % wenn man Oktavfehler mitzählt). Echte Aufnahmen, vor allem Orchester und Synthesizer, sind deutlich schwieriger. Kommandozeile: `playalong entwurf aufnahme.mp3 --titel "…" --taktart 4 --instrument gezupft --lage auto`.
+Das ist ausdrücklich nur eine **Starthilfe**. Laute Bässe und Liegetöne werden herausgerechnet, und die Melodielinie wird geglättet: Oktavfehler und einzelne Ausreißer, die zu keinem Nachbarton passen, werden korrigiert, echte große Sprünge bleiben erhalten. Trotzdem müssen Rhythmus, Tonart und einzelne Töne fast immer korrigiert werden. Gemessen an synthetischen Aufnahmen (Anteil richtiger Töne pro 16tel): Solo-Etüde 82 %, Klarinette mit Klavier 85 %, gezupfte Melodie über lautem Bass 61 % (82 % wenn man Oktavfehler mitzählt). Echte Aufnahmen, vor allem Orchester und Synthesizer, sind deutlich schwieriger. Kommandozeile: `playalong entwurf aufnahme.mp3 --titel "…" --taktart 4 --instrument gezupft --lage auto`.
 
 ## 3. Ein Lied verarbeiten mit der Kommandozeile (Alternative)
 
@@ -164,4 +164,4 @@ playalong sync partitur.mxl aufnahme.mp3 --bericht bericht.html   # nur abgleich
 - `playalong/package.py`, `playalong/report.py`, `playalong/cli.py`: Paket, Prüfbericht, Kommandozeile
 - `playalong/gui.py` + `playalong/web/werkstatt.html`: Werkstatt (lokaler Webserver nur auf 127.0.0.1, Standardbibliothek)
 - `playalong/update.py`: Selbst-Aktualisierung aus GitHub (Commit-Stand von `pipeline/` auf `main`, Datei `.installierte-version.json`)
-- `playalong/transcribe.py`: Rohentwurf (Beat-Tracking, Liegetöne dämpfen, harmonische Summierung mit Lage-Vorliebe, Modus „gezupft“ über Anschläge bzw. „gehalten“ pro 16tel, Tonart nach Krumhansl, Sicherheitswert)
+- `playalong/transcribe.py`: Rohentwurf (Beat-Tracking, Liegetöne dämpfen, harmonische Summierung mit Lage-Vorliebe, Modus „gezupft“ über Anschläge bzw. „gehalten“ pro 16tel, Glättung der Linie per Viterbi über die Oktavwahl, Tonart nach Krumhansl, Sicherheitswert)

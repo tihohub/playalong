@@ -15,7 +15,9 @@ Vorgehen (nur CPU, nur librosa/numpy):
 4b. „gezupft“ (Banjo, Mandoline, Gitarre, Klavier): Töne beginnen an hörbaren Anschlägen;
     je Anschlag zählt die Tonhöhe, deren Energie dort neu einsetzt.
     „automatisch“ rechnet beide und nimmt das eindeutigere Ergebnis.
-5. Tonart schätzen (Krumhansl), MusicXML in B-Notation schreiben, Sicherheit angeben.
+5. Melodielinie glätten: Oktave je Ton im Zusammenhang wählen (Viterbi: kleine Sprünge, nahe der
+   gleitenden Hauptlage, andere Oktave nur wenn hörbar); kurze Ausreißer entfernen.
+6. Tonart schätzen (Krumhansl), MusicXML in B-Notation schreiben, Sicherheit angeben.
 Die Taktzeiten sind aus Schritt 1 bekannt -> sync.json ohne weiteren Abgleich.
 """
 from __future__ import annotations
@@ -193,6 +195,117 @@ def _cells_plucked(y, times, sal, att, grid) -> tuple[list, list, float, float]:
     return cells, starts, conf, decay
 
 
+# --------------------------------------------------------------------------- Melodielinie glätten
+
+SMOOTH_SUPPORT = 0.4  # andere Oktave nur, wenn sie mindestens so stark hörbar ist (Anteil am erkannten Ton)
+SMOOTH_FREE = 7  # Sprünge bis zu dieser Größe (Halbtöne) sind normal und kosten nichts
+SMOOTH_JUMP = 0.5  # Kosten je Halbton über SMOOTH_FREE
+SMOOTH_OCTAVE_JUMP = 6.0  # Zusatzkosten für Sprünge ab einer Oktave
+SMOOTH_REGISTER = 0.5  # Kosten je Halbton außerhalb ±7 Halbtöne um die gleitende Hauptlage
+SMOOTH_EMISSION = 10.0  # Kosten, wenn statt des erkannten Tons eine schwächere Oktave gewählt wird
+SMOOTH_SWITCH = 4.0  # Grundkosten für jeden Oktavwechsel
+
+
+def _notes_from_cells(cells, starts):
+    """[(Start-16tel, Ende-16tel, Tonhöhe)] aus Raster + Anschlagsmarken."""
+    notes = []
+    for i, c in enumerate(cells):
+        if c is None:
+            continue
+        if notes and notes[-1][1] == i and notes[-1][2] == c and not starts[i]:
+            notes[-1][1] = i + 1
+        else:
+            notes.append([i, i + 1, c])
+    return notes
+
+
+def _smooth_line(cells, starts, times, sal, grid):
+    """Oktavfehler und einzelne Ausreißer korrigieren (siehe Modul-Beschreibung)."""
+    notes = _notes_from_cells(cells, starts)
+    if len(notes) < 3:
+        return cells, starts
+    fidx = np.searchsorted(times, grid)
+
+    def support(note, pitch):
+        if pitch < MIDI_LO or pitch > MIDI_HI:
+            return 0.0
+        a = fidx[note[0]]
+        b = max(a + 1, min(fidx[min(note[1], len(fidx) - 1)], a + int(0.15 * SR / HOP)))
+        k = (pitch - MIDI_LO) * BINS_PER_SEMI
+        return float(sal[max(0, k - 1):k + 2, a:b].max()) if b > a else 0.0
+
+    def remove_outliers(ns):
+        """Kurze Töne, die weit von beiden Nachbarn liegen und auch per Oktave nicht passen,
+        dem vorigen Ton zuschlagen (meist ein anderes Instrument)."""
+        out = []
+        for i, n in enumerate(ns):
+            prev_p = out[-1][2] if out else None
+            next_p = ns[i + 1][2] if i + 1 < len(ns) else None
+            neigh = [q for q in (prev_p, next_p) if q is not None]
+            short = n[1] - n[0] <= 2
+            far = bool(neigh) and all(abs(n[2] - q) >= 9 for q in neigh)
+            octave_fits = any(all(abs(n[2] + sh - q) <= 5 for q in neigh) for sh in (-12, 12))
+            if short and far and not octave_fits and out and out[-1][1] == n[0]:
+                out[-1][1] = n[1]
+                continue
+            out.append(n)
+        return out
+
+    notes = remove_outliers(notes)
+    orig = np.array([n[2] for n in notes])
+    # gleitende Hauptlage: Median der Nachbartöne (±8), robust gegen einzelne Ausreißer
+    center = np.array([np.median(orig[max(0, i - 8):i + 9]) for i in range(len(orig))])
+    shifts = (0, -12, 12)
+    cands, emis = [], []
+    for i, n in enumerate(notes):
+        s0 = support(n, n[2]) + 1e-9
+        cs, es = [], []
+        for sh in shifts:
+            p = n[2] + sh
+            sp = support(n, p) if sh else s0
+            if sh and sp < SMOOTH_SUPPORT * s0:
+                continue
+            reg = max(0.0, abs(p - center[i]) - 7) * SMOOTH_REGISTER
+            switch = 0.0 if sh == 0 else SMOOTH_SWITCH + SMOOTH_EMISSION * (1 - min(1.0, sp / s0))
+            cs.append(p)
+            es.append(switch + reg)
+        cands.append(cs)
+        emis.append(es)
+
+    def trans(a, b):
+        d = abs(a - b)
+        return SMOOTH_JUMP * max(0, d - SMOOTH_FREE) + (SMOOTH_OCTAVE_JUMP if d >= 12 else 0.0)
+
+    # Viterbi über die Oktav-Wahl
+    cost = [list(emis[0])]
+    back = [[0] * len(cands[0])]
+    for i in range(1, len(notes)):
+        row, brow = [], []
+        for j, p in enumerate(cands[i]):
+            prev = [cost[i - 1][k] + trans(q, p) for k, q in enumerate(cands[i - 1])]
+            k = int(np.argmin(prev))
+            row.append(prev[k] + emis[i][j])
+            brow.append(k)
+        cost.append(row)
+        back.append(brow)
+    j = int(np.argmin(cost[-1]))
+    chosen = [0] * len(notes)
+    for i in range(len(notes) - 1, -1, -1):
+        chosen[i] = cands[i][j]
+        j = back[i][j]
+    for n, p in zip(notes, chosen):
+        n[2] = p
+    out = remove_outliers(notes)
+
+    new_cells: list = [None] * len(cells)
+    new_starts = [False] * len(cells)
+    for a, b, p in out:
+        for i in range(a, b):
+            new_cells[i] = p
+        new_starts[a] = True
+    return new_cells, new_starts
+
+
 def _label(conf: float) -> str:
     return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
@@ -227,7 +340,7 @@ TYPE = {16: ("whole", 0), 12: ("half", 1), 8: ("half", 0), 6: ("quarter", 1), 4:
 
 
 def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: int = 4,
-               instrument: str = "auto", lage: str = "auto", progress=print) -> Draft:
+               instrument: str = "auto", lage: str = "auto", smooth: bool = True, progress=print) -> Draft:
     import librosa
 
     progress("Aufnahme wird geladen …")
@@ -265,6 +378,8 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
             cells, starts, conf = _cells_held(times, sal, grid)
         if instrument == "auto":
             progress(f"Melodie-Instrument erkannt als „{mode}“ (Abklingen auf {decay:.0%} nach 0,2 s).")
+    if smooth:
+        cells, starts = _smooth_line(cells, starts, times, sal, grid)
 
     progress("Tonart wird bestimmt …")
     key_pc, major = _key(y_h)
