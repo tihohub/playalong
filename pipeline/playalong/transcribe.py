@@ -370,6 +370,28 @@ def _label(conf: float) -> str:
     return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
 
+def _align_downbeat(y: np.ndarray, beats: np.ndarray, beats_per_bar: int) -> np.ndarray:
+    """Taktanfang an der Betonung ausrichten: von den möglichen Lagen (Schlag 1, 2, … als
+    Taktbeginn) die mit den stärksten Einsätzen auf Schlag 1 wählen. Vor dem ersten Takt
+    fehlende Schläge werden im Schlagabstand ergänzt (Auftakt), soweit die Aufnahme reicht."""
+    import librosa
+
+    if len(beats) < beats_per_bar * 4:
+        return beats
+    oenv = librosa.onset.onset_strength(y=y, sr=SR, hop_length=HOP)
+    frames = np.clip(librosa.time_to_frames(beats, sr=SR, hop_length=HOP), 0, len(oenv) - 1)
+    strength = oenv[frames]
+    phase = int(np.argmax([strength[p::beats_per_bar].mean() for p in range(beats_per_bar)]))
+    if phase == 0:
+        return beats
+    step = float(np.median(np.diff(beats[: beats_per_bar * 4])))
+    missing = beats_per_bar - phase  # so viele Schläge vor dem ersten erkannten ergänzen
+    extra = beats[0] - step * np.arange(missing, 0, -1)
+    if extra[0] >= 0:
+        return np.concatenate([extra, beats])
+    return beats[phase:]  # Aufnahme beginnt zu früh: angefangenen ersten Takt weglassen
+
+
 def _key(y: np.ndarray) -> tuple[int, bool]:
     """Tonart (Grundton-Tonklasse, Dur?) nach Krumhansl-Schmuckler."""
     import librosa
@@ -401,7 +423,7 @@ TYPE = {16: ("whole", 0), 12: ("half", 1), 8: ("half", 0), 6: ("quarter", 1), 4:
 
 def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: int = 4,
                instrument: str = "auto", lage: str = "auto", smooth: bool = True, verfahren: str = "schnell",
-               spur: str = "auto", progress=print) -> Draft:
+               spur: str = "auto", tempo_faktor: float = 1.0, progress=print) -> Draft:
     import librosa
 
     progress("Aufnahme wird geladen …")
@@ -418,6 +440,20 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     while tempo > 150 and len(beats) >= beats_per_bar * 4:
         beats = beats[::2]
         tempo /= 2
+    # vom Nutzer gewählt: „doppelt so schnell“ (Schläge dazwischen) bzw. „halb so schnell“ (jeder zweite)
+    f = tempo_faktor
+    while f >= 1.99 and len(beats) >= 2:
+        mid = (beats[:-1] + beats[1:]) / 2
+        beats = np.sort(np.concatenate([beats, mid]))
+        tempo *= 2
+        f /= 2
+    while f <= 0.51 and len(beats) >= beats_per_bar * 4:
+        beats = beats[::2]
+        tempo /= 2
+        f *= 2
+    if tempo_faktor != 1.0:
+        progress(f"Tempo auf Wunsch geändert: ♩ ≈ {tempo:.0f}")
+    beats = _align_downbeat(y, beats, beats_per_bar)
     grid = []  # 16tel-Raster aus den Schlägen
     for a, b in zip(beats[:-1], beats[1:]):
         grid.extend(a + (b - a) * k / 4 for k in range(4))
@@ -427,11 +463,10 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
     if verfahren == "ki":
         from . import ki
 
-        res, work = ki.separate_and_transcribe(audio_path, progress=progress)
-        with work:
-            stem = ki.choose_stem(res, spur)
-            progress(f"Melodie aus der Spur „{ki.STEM_NAMES.get(stem, stem)}“ (Anteil {res['stems'][stem]['energy']:.0%}).")
-            y_stem, _ = librosa.load(res["stems"][stem]["file"], sr=SR, mono=True)
+        res = ki.separate_and_transcribe(audio_path, progress=progress)
+        stem = ki.choose_stem(res, spur)
+        progress(f"Melodie aus der Spur „{ki.STEM_NAMES.get(stem, stem)}“ (Anteil {res['stems'][stem]['energy']:.0%}).")
+        y_stem, _ = librosa.load(res["stems"][stem]["file"], sr=SR, mono=True)
         times, sal, _ = _spectra(y_stem, lage)  # für die Glättung: wie stark ist welcher Ton hörbar
         cells, starts, _ = _cells_from_events(res["stems"][stem]["events"], grid)
         conf = _line_clarity(cells, starts, times, sal, grid)

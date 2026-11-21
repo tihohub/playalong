@@ -75,7 +75,7 @@ def cmd_entwurf(a: argparse.Namespace) -> int:
     pkg, xml = build_draft_package(a.aufnahme, ziel, title=a.titel or Path(a.aufnahme).stem,
                                    composer=a.komponist or "", beats_per_bar=a.taktart,
                                    instrument=a.instrument, lage=a.lage, verfahren=a.verfahren, spur=a.spur,
-                                   progress=_progress)
+                                   tempo_faktor=a.tempo_faktor, progress=_progress)
     print(f"Fertig in {time.time() - t:.0f} s: {pkg}\nNoten zum Nachbearbeiten in MuseScore: {xml}")
     return 0
 
@@ -195,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--lage", choices=["auto", "hoch", "tief"], default="auto", help="wo die Melodie liegt")
     e.add_argument("--verfahren", choices=["schnell", "ki"], default="schnell",
                    help="schnell (ohne KI) oder ki (lokale KI: Demucs + Basic Pitch, vorher „playalong ki-einrichten“)")
+    e.add_argument("--tempo-faktor", type=float, choices=[0.25, 0.5, 1.0, 2.0, 4.0], default=1.0,
+                   help="erkanntes Tempo verdoppeln (2) oder halbieren (0.5), falls die Takte zu lang/kurz sind")
     e.add_argument("--spur", choices=["auto", "vocals", "guitar", "piano", "other"], default="auto",
                    help="nur bei --verfahren ki: Spur mit der Melodie (Gesang, Gitarre, Klavier, Rest)")
     e.add_argument("--ziel")

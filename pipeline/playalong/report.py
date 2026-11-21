@@ -19,7 +19,7 @@ def _tempo_at(tl: Timeline, pos: float) -> float:
     return q
 
 
-def write_report(tl: Timeline, res: SyncResult, audio_path: str, out: Path, title: str) -> Path:
+def write_report(tl: Timeline, res: SyncResult, audio_path: str, out: Path, title: str, note: str = "") -> Path:
     rows = []
     times = res.measure_times
     costs = res.measure_cost
@@ -76,6 +76,7 @@ svg {{ width:100%; height:180px; background:#fff; border:1px solid var(--line); 
     <b>{len(rows)} Takte</b> abgeglichen, Aufnahme {res.audio_duration:.1f} s.
     {"<b style='color:var(--warn)'>" + str(n_flag) + (" Takt" if n_flag == 1 else " Takte") + " bitte anhören</b> (orange markiert)." if n_flag else "<b style='color:var(--ok)'>Keine Auffälligkeiten.</b>"}
     <br>So prüfen: Aufnahme abspielen. Der Klick sollte genau auf jeden Taktanfang fallen. Auf einen Takt tippen spielt ab dort.
+    {('<br><b>Hinweis:</b> ' + html.escape(note)) if note else ''}
   </div>
   <svg id="curve" viewBox="0 0 1000 180" preserveAspectRatio="none"></svg>
   <div class="legend">Tempokurve: <span style="color:#2980b9">■</span> gespieltes Tempo laut Abgleich, <span style="color:#aaa">■</span> notiertes Tempo. Plötzliche Zacken deuten auf Fehler im Abgleich hin.</div>
