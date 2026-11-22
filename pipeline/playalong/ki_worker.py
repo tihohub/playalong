@@ -93,6 +93,13 @@ def run(audio: str, out: Path) -> dict:
 
 
 def main() -> int:
+    # Meldungen immer in UTF-8 ausgeben: Wegen „python -I“ wird PYTHONIOENCODING ignoriert,
+    # und Windows würde sonst cp1252 verwenden (Anführungszeichen und „…“ kämen als � an).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser()
     p.add_argument("--vorbereiten", action="store_true")
     p.add_argument("--audio")

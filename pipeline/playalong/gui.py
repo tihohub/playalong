@@ -147,11 +147,15 @@ def run_draft(job: Job, req: dict) -> None:
         lage = req.get("lage") if req.get("lage") in ("auto", "hoch", "tief") else "auto"
         verfahren = "ki" if req.get("verfahren") == "ki" else "schnell"
         spur = req.get("spur") if req.get("spur") in ("auto", "vocals", "guitar", "piano", "other") else "auto"
+        try:
+            tempo_faktor = min(8.0, max(0.125, float(req.get("tempo_faktor") or 1)))
+        except (TypeError, ValueError):
+            tempo_faktor = 1.0
         pkg, xml = build_draft_package(audio, ziel, title=(req.get("titel") or "").strip() or audio.stem,
                                        composer=(req.get("komponist") or "").strip(),
                                        beats_per_bar=3 if str(req.get("taktart")) == "3" else 4,
                                        instrument=instrument, lage=lage, verfahren=verfahren, spur=spur,
-                                       progress=job.log.append, info=info)
+                                       tempo_faktor=tempo_faktor, progress=job.log.append, info=info)
         rep = Path(ziel) / "Prüfberichte" / f"{pkg.stem}.html"
         job.result = {"file": pkg.name, "path": str(pkg), "report": rep.name if rep.exists() else "",
                       "draft": str(xml), "seconds": round(time.time() - t), "erkennung": info}

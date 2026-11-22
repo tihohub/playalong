@@ -11,7 +11,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -104,15 +103,39 @@ def setup(progress=print) -> dict:
     return status()
 
 
-def separate_and_transcribe(audio: str, progress=print) -> tuple[dict, tempfile.TemporaryDirectory]:
-    """Arbeitsprozess aufrufen. Gibt (Ergebnis, Arbeitsordner) zurück; der Ordner enthält die Spuren."""
+CACHE = KI_DIR / "zwischenspeicher"
+CACHE_KEEP = 5  # so viele Aufnahmen bleiben zwischengespeichert
+
+
+def separate_and_transcribe(audio: str, progress=print) -> dict:
+    """Arbeitsprozess aufrufen. Das Ergebnis (inkl. Spuren) wird je Aufnahme zwischengespeichert,
+    damit ein erneuter Entwurf (z. B. mit anderem Tempo) nur Sekunden dauert."""
+    import hashlib
+    import shutil
+
     if not status()["installed"]:
         raise RuntimeError("Die KI-Erweiterung ist noch nicht eingerichtet.")
-    work = tempfile.TemporaryDirectory(prefix="playalong-ki-")
-    _run([str(python_exe()), "-I", str(WORKER), "--audio", str(audio), "--out", work.name], progress,
-         "KI-Auswertung")
-    res = json.loads((Path(work.name) / "ergebnis.json").read_text(encoding="utf-8"))
-    return res, work
+    key = hashlib.sha1(Path(audio).read_bytes()).hexdigest()[:16]
+    out = CACHE / key
+    result = out / "ergebnis.json"
+    if result.exists():
+        progress("Spurtrennung und Notenerkennung aus dem Zwischenspeicher (diese Aufnahme wurde schon ausgewertet).")
+        os.utime(out)
+    else:
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
+        out.mkdir(parents=True)
+        try:
+            _run([str(python_exe()), "-I", str(WORKER), "--audio", str(audio), "--out", str(out)], progress,
+                 "KI-Auswertung")
+        except Exception:
+            shutil.rmtree(out, ignore_errors=True)
+            raise
+        # älteste Einträge aufräumen
+        entries = sorted((d for d in CACHE.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True)
+        for d in entries[CACHE_KEEP:]:
+            shutil.rmtree(d, ignore_errors=True)
+    return json.loads(result.read_text(encoding="utf-8"))
 
 
 STEM_NAMES = {"vocals": "Gesang", "guitar": "Gitarre", "piano": "Klavier", "other": "Rest"}
