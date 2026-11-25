@@ -115,6 +115,8 @@ def _spectra(y: np.ndarray, lage: str):
     D = np.maximum(0, Lr - np.concatenate([Lr[:, :lag], Lr[:, :-lag]], axis=1))
     att = _restrict(_harmonic_sum(D, n_cand_ext), lage)
     times = librosa.frames_to_time(np.arange(C.shape[1]), sr=SR, hop_length=HOP)
+    global _LAST_SPEC  # für die Oktavprüfung (ungedämpftes Spektrum)
+    _LAST_SPEC = (times, np.log1p(10 * C / (C.max() + 1e-9)))
     return times, sal, att
 
 
@@ -366,6 +368,43 @@ def _line_clarity(cells, starts, times, sal, grid) -> float:
     return float(np.mean(vals)) if vals else 0.0
 
 
+_LAST_SPEC = None
+# gemessen am Testsatz (gezupfte Gitarre über Streichern: F1 0,56 -> 0,94, andere Besetzungen unverändert)
+OCTAVE_FIFTH = 0.15  # Quinte über dem Ton (3. Teilton der Unteroktave) mindestens so stark (Anteil am Ton)
+OCTAVE_LOW = 0.6  # Unteroktave mindestens so stark (Anteil am Ton)
+
+
+def _octave_check(cells, starts, grid):
+    """Ton eine Oktave tiefer setzen, wenn er offenbar nur der 2. Teilton eines tieferen Tons ist:
+    Unteroktave hörbar UND Quinte darüber (= 3. Teilton der Unteroktave) deutlich vorhanden.
+    Typisch bei Gitarre, Banjo & Co., deren Oktav-Oberton stärker ist als der Grundton."""
+    if _LAST_SPEC is None:
+        return cells, 0
+    times, L = _LAST_SPEC
+    fidx = np.searchsorted(times, grid)
+    notes = _notes_from_cells(cells, starts)
+    moved = 0
+
+    def level(m, a, b):
+        k = (m - MIDI_EXT) * BINS_PER_SEMI
+        if k < 0 or k + 1 >= L.shape[0]:
+            return 0.0
+        return float(L[max(0, k - 1):k + 2, a:b].max(axis=0).mean())
+
+    for a, b, p in notes:
+        if p - 12 < MIDI_LO:
+            continue
+        fa, fb = fidx[a], max(fidx[a] + 1, fidx[min(b, len(fidx) - 1)])
+        c = level(p, fa, fb)
+        if c <= 0:
+            continue
+        if level(p - 12, fa, fb) >= OCTAVE_LOW * c and level(p + 7, fa, fb) >= OCTAVE_FIFTH * c:
+            for i in range(a, b):
+                cells[i] = p - 12
+            moved += 1
+    return cells, moved
+
+
 def _label(conf: float) -> str:
     return "gut" if conf >= 0.35 else "mittel" if conf >= 0.2 else "unsicher"
 
@@ -423,7 +462,8 @@ TYPE = {16: ("whole", 0), 12: ("half", 1), 8: ("half", 0), 6: ("quarter", 1), 4:
 
 def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: int = 4,
                instrument: str = "auto", lage: str = "auto", smooth: bool = True, verfahren: str = "schnell",
-               spur: str = "auto", tempo_faktor: float = 1.0, progress=print) -> Draft:
+               spur: str = "auto", tempo_faktor: float = 1.0, octave_check: bool = True,
+               progress=print) -> Draft:
     import librosa
 
     progress("Aufnahme wird geladen …")
@@ -489,6 +529,10 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
             cells, starts, conf = _cells_held(times, sal, grid)
         if instrument == "auto":
             progress(f"Melodie-Instrument erkannt als „{mode}“ (Abklingen auf {decay:.0%} nach 0,2 s).")
+    if octave_check:
+        cells, moved = _octave_check(cells, starts, grid)
+        if moved:
+            progress(f"{moved} Töne eine Oktave tiefer gesetzt (Oberton statt Grundton erkannt).")
     if smooth:
         cells, starts = _smooth_line(cells, starts, times, sal, grid)
 
