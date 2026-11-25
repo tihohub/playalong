@@ -311,6 +311,9 @@ def _smooth_line(cells, starts, times, sal, grid):
 # --------------------------------------------------------------------------- Verfahren „lokale KI“
 
 KI_MIN_DUR = 0.06  # kürzere erkannte Töne verwerfen (s)
+OVERTONE_STEPS = (12, 19, 24, 28)  # Oktave, Duodezime, Doppeloktave, große Terz darüber
+KI_OVERTONE_FACTOR = 1.0  # Ton gilt als Oberton, wenn er nicht lauter ist als der tiefere Ton (Testsatz: Klarinette 0,25 -> 0,54)
+KI_OVERTONES = True
 
 
 def _cells_from_events(events, grid) -> tuple[list, list, float]:
@@ -326,6 +329,11 @@ def _cells_from_events(events, grid) -> tuple[list, list, float]:
             groups.append([e])
     notes = []
     for g in groups:
+        if KI_OVERTONES and len(g) > 1:
+            # Obertöne eines gleichzeitig erkannten tieferen Tons verwerfen (Basic Pitch erkennt sie
+            # bei Bläsern oft als eigene Noten)
+            g = [x for x in g if not any((x[2] - y[2]) in OVERTONE_STEPS and x[3] <= KI_OVERTONE_FACTOR * y[3]
+                                         for y in g if y is not x)] or g
         loud = max(x[3] for x in g)
         cand = [x for x in g if x[3] >= 0.5 * loud]
         s, e, p, a = max(cand, key=lambda x: x[2])
@@ -529,7 +537,7 @@ def transcribe(audio_path: str, title: str, composer: str = "", beats_per_bar: i
             cells, starts, conf = _cells_held(times, sal, grid)
         if instrument == "auto":
             progress(f"Melodie-Instrument erkannt als „{mode}“ (Abklingen auf {decay:.0%} nach 0,2 s).")
-    if octave_check:
+    if octave_check and verfahren != "ki":  # im KI-Weg bestimmt Basic Pitch die Oktave (Prüfung schadet dort)
         cells, moved = _octave_check(cells, starts, grid)
         if moved:
             progress(f"{moved} Töne eine Oktave tiefer gesetzt (Oberton statt Grundton erkannt).")
